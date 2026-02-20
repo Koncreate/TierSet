@@ -27,6 +27,15 @@ export class BoardStorage {
   }
 
   /**
+   * Get raw binary data for a board
+   */
+  async getBoardBinary(id: BoardId): Promise<Uint8Array | null> {
+    const record = await db.boards.get(id);
+    if (!record) return null;
+    return record.doc;
+  }
+
+  /**
    * Save a board document
    */
   async saveBoard(id: BoardId, doc: BoardDocument): Promise<void> {

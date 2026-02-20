@@ -1,61 +1,115 @@
 /**
  * P2P Signaling Client
- * 
- * Wrapper module for TanStack Start signaling routes.
- * This module exists to enable easier mocking in unit tests.
- * 
- * In production, these functions call the TanStack Start server functions.
- * In tests, stub implementations are used.
+ *
+ * Client-side API client for P2P signaling operations.
+ * Calls TanStack Start server functions directly.
  */
 
-// Try to import from mocks first (for tests), fall back to real implementation
-let createRoom: any, joinRoom: any, submitOffer: any, getAnswer: any, getOffer: any;
-let submitAnswer: any, submitCandidate: any, getCandidates: any, leaveRoom: any;
-let kickPeer: any, getRoomInfo: any, getSignalingStats: any;
+import {
+  createRoom as createRoomFn,
+  getRoomInfo as getRoomInfoFn,
+  joinRoom as joinRoomFn,
+  submitOffer as submitOfferFn,
+  getOffer as getOfferFn,
+  submitAnswer as submitAnswerFn,
+  getAnswer as getAnswerFn,
+  submitCandidate as submitCandidateFn,
+  getCandidates as getCandidatesFn,
+  leaveRoom as leaveRoomFn,
+  kickPeer as kickPeerFn,
+  getSignalingStats as getSignalingStatsFn,
+} from "../../routes/api/-signaling";
 
-try {
-  // Try to import mocks (will work in test environment)
-  const mocks = await import("./__mocks__/signaling-client");
-  createRoom = mocks.createRoom;
-  joinRoom = mocks.joinRoom;
-  submitOffer = mocks.submitOffer;
-  getAnswer = mocks.getAnswer;
-  getOffer = mocks.getOffer;
-  submitAnswer = mocks.submitAnswer;
-  submitCandidate = mocks.submitCandidate;
-  getCandidates = mocks.getCandidates;
-  leaveRoom = mocks.leaveRoom;
-  kickPeer = mocks.kickPeer;
-  getRoomInfo = mocks.getRoomInfo;
-  getSignalingStats = mocks.getSignalingStats;
-} catch {
-  // Fall back to real implementation (production)
-  const real = await import("../../routes/api/-signaling");
-  createRoom = real.createRoom;
-  joinRoom = real.joinRoom;
-  submitOffer = real.submitOffer;
-  getAnswer = real.getAnswer;
-  getOffer = real.getOffer;
-  submitAnswer = real.submitAnswer;
-  submitCandidate = real.submitCandidate;
-  getCandidates = real.getCandidates;
-  leaveRoom = real.leaveRoom;
-  kickPeer = real.kickPeer;
-  getRoomInfo = real.getRoomInfo;
-  getSignalingStats = real.getSignalingStats;
+/**
+ * Create a new room (host side)
+ */
+export async function createRoom(data: {
+  peerId: string;
+  peerName?: string;
+  password?: string;
+  maxPeers?: number;
+  ttlMs?: number;
+}) {
+  return createRoomFn({ data });
 }
 
-export {
-  createRoom,
-  joinRoom,
-  submitOffer,
-  getAnswer,
-  getOffer,
-  submitAnswer,
-  submitCandidate,
-  getCandidates,
-  leaveRoom,
-  kickPeer,
-  getRoomInfo,
-  getSignalingStats,
-};
+/**
+ * Get room info
+ */
+export async function getRoomInfo(code: string) {
+  return getRoomInfoFn({ data: { code } });
+}
+
+/**
+ * Join a room
+ */
+export async function joinRoom(data: { code: string; peerId: string; password?: string }) {
+  return joinRoomFn({ data });
+}
+
+/**
+ * Submit SDP offer
+ */
+export async function submitOffer(data: { code: string; offer: RTCSessionDescriptionInit }) {
+  return submitOfferFn({ data });
+}
+
+/**
+ * Get SDP offer
+ */
+export async function getOffer(code: string) {
+  return getOfferFn({ data: { code } });
+}
+
+/**
+ * Submit SDP answer
+ */
+export async function submitAnswer(data: { code: string; answer: RTCSessionDescriptionInit }) {
+  return submitAnswerFn({ data });
+}
+
+/**
+ * Get SDP answer
+ */
+export async function getAnswer(code: string) {
+  return getAnswerFn({ data: { code } });
+}
+
+/**
+ * Submit ICE candidate
+ */
+export async function submitCandidate(data: {
+  code: string;
+  candidate: RTCIceCandidateInit;
+  from: "host" | "client";
+}) {
+  return submitCandidateFn({ data });
+}
+
+/**
+ * Get ICE candidates
+ */
+export async function getCandidates(data: { code: string; from: "host" | "client" }) {
+  return getCandidatesFn({ data });
+}
+
+/**
+ * Leave a room
+ */
+export async function leaveRoom(data: { code: string; peerId: string }) {
+  return leaveRoomFn({ data });
+}
+
+/**
+ * Kick a peer
+ */
+export async function kickPeer(data: { code: string; peerId: string; hostId: string }) {
+  return kickPeerFn({ data });
+}
+
+/**
+ * Get signaling stats
+ */
+export async function getSignalingStats() {
+  return getSignalingStatsFn();
+}

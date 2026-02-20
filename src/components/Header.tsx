@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import ParaglideLocaleSwitcher from "./LocaleSwitcher.tsx";
 
 import { useState } from "react";
-import { ClipboardType, Home, Languages, Menu, Network, Store, X } from "lucide-react";
+import { House, X, Network, Storefront, ClipboardText, Translate, List } from "@phosphor-icons/react";
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,7 +16,7 @@ export default function Header() {
           className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
           aria-label="Open menu"
         >
-          <Menu size={24} />
+          <List size={24} />
         </button>
         <h1 className="ml-4 text-xl font-semibold">
           <Link to="/">
@@ -51,7 +51,7 @@ export default function Header() {
                 "flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2",
             }}
           >
-            <Home size={20} />
+            <House size={20} />
             <span className="font-medium">Home</span>
           </Link>
 
@@ -79,7 +79,7 @@ export default function Header() {
                 "flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2",
             }}
           >
-            <Store size={20} />
+            <Storefront size={20} />
             <span className="font-medium">Store</span>
           </Link>
 
@@ -92,7 +92,7 @@ export default function Header() {
                 "flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2",
             }}
           >
-            <ClipboardType size={20} />
+            <ClipboardText size={20} />
             <span className="font-medium">Simple Form</span>
           </Link>
 
@@ -105,7 +105,7 @@ export default function Header() {
                 "flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2",
             }}
           >
-            <ClipboardType size={20} />
+            <ClipboardText size={20} />
             <span className="font-medium">Address Form</span>
           </Link>
 
@@ -118,7 +118,7 @@ export default function Header() {
                 "flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2",
             }}
           >
-            <Languages size={20} />
+            <Translate size={20} />
             <span className="font-medium">I18n example</span>
           </Link>
 

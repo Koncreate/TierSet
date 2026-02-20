@@ -1,12 +1,14 @@
 import { EventEmitter } from "eventemitter3";
 import { getIceServers } from "./ice-servers";
 import { validateP2PMessage } from "./types";
+import { createId } from "../ids";
 import type {
   P2PMessage,
   PeerInfo,
   ConnectionStatus,
   SyncStats,
   SyncMessage,
+  FullSyncMessage,
   ConnectionQuality,
   ImageChunkMessage,
 } from "./types";
@@ -22,12 +24,14 @@ import {
   getCandidates,
   leaveRoom as leaveRoomFn,
   kickPeer as kickPeerFn,
-} from "./signaling-client";
+} from "../../routes/api/-signaling";
 
 interface P2PEvents {
   "peer:joined": (peer: PeerInfo) => void;
   "peer:left": (peer: PeerInfo) => void;
   "sync:received": (delta: Uint8Array, senderId: string) => void;
+  "sync:request": (boardId: string, requesterId: string) => void;
+  "fullsync:received": (document: Uint8Array, senderId: string) => void;
   "message:received": (message: P2PMessage) => void;
   "status:changed": (status: ConnectionStatus) => void;
   "image:received": (imageId: string, blob: Blob, senderId: string) => void;
@@ -76,7 +80,7 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
 
   constructor(options: P2POptions = {}) {
     super();
-    this.id = crypto.randomUUID();
+    this.id = createId();  // Use cuid2 for compatibility with Zod schemas
     this.options = {
       peerName: `Peer-${this.id.slice(0, 6)}`,
       ...options,
@@ -103,23 +107,42 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
     if (!this.pc) return;
 
     this.pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        const candidate = event.candidate.toJSON();
-        this.pendingCandidates.push(candidate);
+      // null candidate = end-of-candidates signal, don't send to server
+      if (!event.candidate) return;
 
-        // Send candidate to signaling server if in a room
-        if (this.currentRoomCode) {
-          try {
-            await submitCandidate({
-              data: {
-                code: this.currentRoomCode,
-                candidate,
-                from: this.isHost ? "host" : "client",
-              },
-            });
-          } catch (error) {
-            console.error("[P2PNetwork] Failed to send ICE candidate:", error);
+      // Skip if candidate string is empty (another end-of-candidates signal)
+      const candidateString = event.candidate.candidate;
+      if (!candidateString) return;
+
+      // Skip if connection is already established
+      if (this.pc?.connectionState === "connected") return;
+
+      // Convert RTCIceCandidate to plain object for serialization
+      const candidate: RTCIceCandidateInit = {
+        candidate: candidateString,
+        sdpMid: event.candidate.sdpMid || undefined,
+        sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
+        usernameFragment: event.candidate.usernameFragment || undefined,
+      };
+
+      this.pendingCandidates.push(candidate);
+
+      // Send candidate to signaling server if in a room
+      if (this.currentRoomCode) {
+        try {
+          const result = await submitCandidate({
+            data: {
+              code: this.currentRoomCode,
+              candidate,
+              from: this.isHost ? "host" : "client",
+            },
+          });
+          // Handle error response from server
+          if (result && 'success' in result && !result.success) {
+            console.warn("[P2PNetwork] ICE candidate submission failed:", result.error);
           }
+        } catch (error) {
+          console.error("[P2PNetwork] Failed to send ICE candidate:", error);
         }
       }
     };
@@ -208,13 +231,19 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
       this.emit("error", error instanceof Error ? error : new Error(String(error)));
     };
 
-    // State for receiving two-part sync messages
+    // State for receiving two-part messages
     let pendingSyncMetadata: {
       boardId: string;
       timestamp: number;
       senderId: string;
       sequence: number;
       byteLength: number;
+    } | null = null;
+    
+    let pendingAutomergeMetadata: {
+      targetPeerId: string;
+      timestamp: number;
+      senderId: string;
     } | null = null;
 
     channel.onmessage = (event) => {
@@ -224,14 +253,17 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
           const metadata = JSON.parse(event.data);
           if (metadata.type === "sync" && metadata.byteLength) {
             pendingSyncMetadata = metadata;
+          } else if (metadata.type === "automerge") {
+            pendingAutomergeMetadata = metadata;
           } else {
             this.handleMessage(event.data);
           }
-        } catch {
+        } catch (error) {
+          console.warn("[message] Failed to parse metadata");
           this.handleMessage(event.data);
         }
       } else if (pendingSyncMetadata) {
-        // Binary delta following metadata
+        // Binary delta following sync metadata
         const delta = new Uint8Array(event.data);
         const syncMessage = {
           type: "sync" as const,
@@ -243,6 +275,17 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
         };
         pendingSyncMetadata = null;
         this.handleSyncMessage(syncMessage);
+      } else if (pendingAutomergeMetadata) {
+        // Binary data following automerge metadata
+        const data = new Uint8Array(event.data);
+        this.emit("message:received", {
+          type: "automerge",
+          targetPeerId: pendingAutomergeMetadata.targetPeerId,
+          timestamp: pendingAutomergeMetadata.timestamp,
+          senderId: pendingAutomergeMetadata.senderId,
+          data,
+        });
+        pendingAutomergeMetadata = null;
       } else {
         // Other binary message
         this.handleMessage(event.data);
@@ -276,6 +319,12 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
         case "sync":
           this.handleSyncMessage(message);
           break;
+        case "sync:request":
+          this.emit("sync:request", message.boardId, message.senderId);
+          break;
+        case "fullsync":
+          this.handleFullSyncMessage(message);
+          break;
         case "peer:join":
           this.handlePeerJoin(message);
           break;
@@ -294,6 +343,9 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
         case "image:complete":
           this.handleImageComplete(message);
           break;
+        case "automerge":
+          // Automerge message - binary data follows in channel.onmessage handler
+          break;
       }
     } catch (error) {
       console.error("Failed to handle message:", error);
@@ -304,19 +356,25 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
   private async handleSyncMessage(message: SyncMessage): Promise<void> {
     // Rate limit sync messages
     const result = await p2pRateLimiter.executeWithRateLimit(message.senderId, async () => {
-      // Validate timestamp (prevent replay attacks)
+      // Validate timestamp
       const now = Date.now();
       const maxAge = 3600000; // 1 hour
       if (Math.abs(message.timestamp - now) > maxAge) {
-        console.warn("Sync message timestamp out of range");
+        console.warn("[sync] Timestamp out of range");
         return false;
       }
 
       // Track sequence to detect missing messages
       const lastSeq = this.peerSequence.get(message.senderId) || 0;
       if (message.sequence <= lastSeq) {
-        console.warn("Out of order sync message");
+        console.warn("[sync] Duplicate or out-of-order message, seq:", message.sequence);
         return false;
+      }
+
+      // Check for gaps in sequence
+      const expectedSeq = lastSeq + 1;
+      if (message.sequence !== expectedSeq) {
+        console.warn("[sync] Sequence gap: expected", expectedSeq, "got", message.sequence);
       }
 
       this.peerSequence.set(message.senderId, message.sequence);
@@ -325,8 +383,13 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
     });
 
     if (result === null) {
-      console.warn("Sync message rate limited");
+      console.warn("[sync] Rate limited");
     }
+  }
+
+  private handleFullSyncMessage(message: FullSyncMessage): void {
+    console.log("[fullsync] Received document from:", message.senderId, "size:", message.document.length);
+    this.emit("fullsync:received", message.document, message.senderId);
   }
 
   private handlePeerJoin(message: { peerId: string; peerName: string }): void {
@@ -411,7 +474,8 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
   async createRoom(options?: {
     password?: string;
     maxPeers?: number;
-  }): Promise<{ code: string; room: P2PNetwork }> {
+    documentUrl?: string;
+  }): Promise<{ code: string; room: P2PNetwork; documentUrl?: string }> {
     this.setStatus("connecting");
 
     // Create room on signaling server
@@ -421,6 +485,7 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
         peerName: this.options.peerName,
         password: options?.password,
         maxPeers: options?.maxPeers,
+        documentUrl: options?.documentUrl,
       },
     });
 
@@ -444,11 +509,12 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
     // Wait for ICE gathering to complete
     await this.waitForIceGathering();
 
-    // Submit offer to signaling server
+    // Submit offer to signaling server (convert to plain object for serialization)
+    const localDesc = this.pc!.localDescription!;
     await submitOffer({
       data: {
         code: roomInfo.code,
-        offer: this.pc!.localDescription!,
+        offer: { type: localDesc.type, sdp: localDesc.sdp },
       },
     });
 
@@ -473,20 +539,20 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
 
     this.setStatus("connected");
 
-    return { code: roomInfo.code, room: this };
+    return { code: roomInfo.code, room: this, documentUrl: roomInfo.documentUrl };
   }
 
   /**
    * Join an existing room as client
    */
-  async joinRoom(code: string, options?: { password?: string }): Promise<P2PNetwork> {
+  async joinRoom(code: string, options?: { password?: string }): Promise<{ room: P2PNetwork; documentUrl?: string | null }> {
     this.setStatus("connecting");
     this.currentRoomCode = code;
     this.isHost = false;
 
     try {
-      // Join room on signaling server
-      await joinRoomFn({
+      // Join room on signaling server and get document URL
+      const joinResult = await joinRoomFn({
         data: {
           code,
           peerId: this.id,
@@ -510,11 +576,12 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
       // Wait for ICE gathering
       await this.waitForIceGathering();
 
-      // Submit answer to signaling server
+      // Submit answer to signaling server (convert to plain object for serialization)
+      const localDesc = this.pc!.localDescription!;
       await submitAnswer({
         data: {
           code,
-          answer: this.pc!.localDescription!,
+          answer: { type: localDesc.type, sdp: localDesc.sdp },
         },
       });
 
@@ -527,7 +594,28 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
       // Wait for connection to establish
       await this.waitForConnection();
 
-      return this;
+      // Notify host that we've joined
+      this.sendMessage({
+        type: "peer:join",
+        peerId: this.id,
+        peerName: this.options.peerName || "Peer",
+        timestamp: Date.now(),
+      });
+
+      // Add self as peer
+      this.peers.set(this.id, {
+        id: this.id,
+        name: this.options.peerName || "You",
+        role: "client",
+        connectedAt: Date.now(),
+        capabilities: {
+          canHost: true,
+          canRelay: true,
+          supportsVideo: false,
+        },
+      });
+
+      return { room: this, documentUrl: joinResult.documentUrl };
     } catch (error) {
       console.error("Failed to join room:", error);
       this.setStatus("failed");
@@ -689,12 +777,36 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
    * Poll for client answer (host side)
    */
   private startAnswerPolling(code: string): void {
+    let answered = false;
+    
     const poll = async () => {
+      // Stop if already received answer
+      if (answered) return;
+      
       const result = await getAnswer({ data: { code } });
       if (result.answer && this.pc) {
+        // Check if we're in a valid state to set remote description
+        const signalingState = this.pc.signalingState;
+        if (signalingState === "stable") {
+          // Already connected, stop polling
+          answered = true;
+          if (this.answerPollInterval) {
+            clearInterval(this.answerPollInterval);
+            this.answerPollInterval = null;
+          }
+          return;
+        }
+        
         try {
           await this.pc.setRemoteDescription(new RTCSessionDescription(result.answer));
           console.log("[P2PNetwork] Received answer from client");
+          answered = true;
+          
+          // Stop polling once we have the answer
+          if (this.answerPollInterval) {
+            clearInterval(this.answerPollInterval);
+            this.answerPollInterval = null;
+          }
         } catch (error) {
           console.error("[P2PNetwork] Failed to set remote description:", error);
         }
@@ -713,16 +825,33 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
    */
   private startCandidatePolling(code: string): void {
     const from: "host" | "client" = this.isHost ? "client" : "host";
+    const seenCandidates = new Set<string>();
 
     const poll = async () => {
       const result = await getCandidates({ data: { code, from } });
       if (result.candidates && result.candidates.length > 0 && this.pc) {
         for (const candidate of result.candidates) {
+          // Create a unique key for deduplication
+          const candidateKey = JSON.stringify(candidate);
+          if (seenCandidates.has(candidateKey)) continue;
+          seenCandidates.add(candidateKey);
+
           try {
             await this.pc.addIceCandidate(candidate);
           } catch (error) {
-            console.error("[P2PNetwork] Failed to add ICE candidate:", error);
+            // Ignore errors for already-added candidates or when connection is stable
+            if (!(error as DOMException)?.message?.includes("InvalidStateError")) {
+              console.error("[P2PNetwork] Failed to add ICE candidate:", error);
+            }
           }
+        }
+      }
+      
+      // Stop polling if connection is established
+      if (this.pc?.connectionState === "connected") {
+        if (this.candidatePollInterval) {
+          clearInterval(this.candidatePollInterval);
+          this.candidatePollInterval = null;
         }
       }
     };
@@ -817,6 +946,13 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
   }
 
   /**
+   * Get the name of this peer
+   */
+  getPeerName(): string {
+    return this.options.peerName || "Anonymous";
+  }
+
+  /**
    * Get connected peers
    */
   getPeers(): PeerInfo[] {
@@ -835,15 +971,13 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
    */
   sendSync(boardId: string, delta: Uint8Array): void {
     if (!this.dataChannel || this.dataChannel.readyState !== "open") {
-      console.warn("Cannot send sync - data channel not ready");
+      console.warn("[sync] Cannot send - channel not ready");
       return;
     }
 
     const sequence = ++this.sequence;
     const timestamp = Date.now();
 
-    // Send metadata first, then binary delta
-    // This allows receiver to track sequence/timestamp for replay detection
     const metadata = {
       type: "sync",
       boardId,
@@ -854,13 +988,62 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
     };
 
     try {
-      // Send metadata as JSON
       this.dataChannel.send(JSON.stringify(metadata));
-      // Send binary delta
       this.dataChannel.send(delta);
     } catch (error) {
-      console.error("Failed to send sync:", error);
+      console.error("[sync] Send failed:", error instanceof Error ? error.message : String(error));
       this.emit("error", error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * Request full sync from peer (for initial sync when joining)
+   */
+  requestSync(boardId: string): void {
+    if (!this.dataChannel || this.dataChannel.readyState !== "open") {
+      console.warn("[sync] Cannot request - channel not ready");
+      return;
+    }
+
+    const message = {
+      type: "sync:request" as const,
+      boardId,
+      timestamp: Date.now(),
+      senderId: this.id,
+    };
+
+    try {
+      this.dataChannel.send(JSON.stringify(message));
+      console.log("[sync] Sent sync request for board:", boardId);
+    } catch (error) {
+      console.error("[sync] Request failed:", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * Send full document to a specific peer (in response to sync:request)
+   */
+  sendFullDocument(boardId: string, document: Uint8Array, targetPeerId: string): void {
+    if (!this.dataChannel || this.dataChannel.readyState !== "open") {
+      console.warn("[sync] Cannot send - channel not ready");
+      return;
+    }
+
+    const timestamp = Date.now();
+
+    const message = {
+      type: "fullsync" as const,
+      boardId,
+      document,
+      timestamp,
+      senderId: this.id,
+    };
+
+    try {
+      this.dataChannel.send(JSON.stringify(message));
+      console.log("[fullsync] Sent full document:", document.length, "bytes to", targetPeerId);
+    } catch (error) {
+      console.error("[sync] Full document send failed:", error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -935,6 +1118,33 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
       imageId,
       senderId: this.id,
     });
+  }
+
+  /**
+   * Send Automerge sync message to specific peer
+   */
+  sendAutomergeMessage(targetPeerId: string, data: Uint8Array): void {
+    if (!this.dataChannel || this.dataChannel.readyState !== "open") {
+      console.warn("[automerge] Cannot send - channel not ready");
+      return;
+    }
+
+    const message = {
+      type: "automerge" as const,
+      targetPeerId,
+      timestamp: Date.now(),
+      senderId: this.id,
+    };
+
+    try {
+      // Send metadata first
+      this.dataChannel.send(JSON.stringify(message));
+      // Send binary data
+      this.dataChannel.send(data);
+    } catch (error) {
+      console.error("[automerge] Send failed:", error instanceof Error ? error.message : String(error));
+      this.emit("error", error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /**

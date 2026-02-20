@@ -404,12 +404,14 @@ export class RoomManager {
 
 **Automatic Conflict Resolution:**
 
+> **Reference:** For correct Automerge patterns in React, see [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt). In React components, use `useDocument()` hook and `changeDoc()` - NOT the low-level `A.change()` API shown below.
+
 ```typescript
-// Automerge handles concurrent edits safely
+// Low-level Automerge API (for context):
 import * as A from "@automerge/automerge";
 
 const doc1 = A.change(initialDoc, (d) => {
-  d.tiers[0].items.push("mario");
+  d.tiers[0].items.push("mario");  // Direct mutation, NOT spread
 });
 
 const doc2 = A.change(initialDoc, (d) => {
@@ -419,19 +421,24 @@ const doc2 = A.change(initialDoc, (d) => {
 // Merge is deterministic and conflict-free
 const merged = A.merge(doc1, doc2);
 // Result: ['mario', 'luigi'] - both changes preserved
+
+// REACT PATTERN (use this in components):
+// const [doc, changeDoc] = useDocument<BoardDocument>(docUrl);
+// changeDoc((d) => d.tiers[0].itemIds.push("mario"));
 ```
 
 **Validation on Merge:**
 
 ```typescript
 // src/lib/documents/BoardDocument.ts
+// Note: In React, use useDocument() hook. See docs/llms/automerge-llms.txt
 
 export function safeMerge(local: BoardDocument, remote: Uint8Array): BoardDocument | null {
   try {
-    // Apply remote changes
+    // Apply remote changes via Automerge's sync protocol
     const merged = A.merge(local, remote);
 
-    // Validate result
+    // Validate result with Zod schema
     const result = BoardDocumentSchema.safeParse(merged);
 
     if (!result.success) {
@@ -713,7 +720,7 @@ class AuditLogger {
 | **Access Control (Room Codes)** | ✅ Good            | Cryptographically secure random |
 | **Input Validation (Zod)**      | ✅ Good            | Comprehensive schemas           |
 | **Rate Limiting (Pacer)**       | ✅ Good            | Per-peer, per-user limits       |
-| **Data Integrity (Automerge)**  | ✅ Good            | CRDT + validation               |
+| **Data Integrity (Automerge)**  | ✅ Good            | CRDT + validation. See [docs/llms/automerge-llms.txt](./llms/automerge-llms.txt) |
 | **At-Rest Encryption**          | ⚠️ Partial         | Browser-dependent               |
 | **E2EE**                        | ❌ Not implemented | Future enhancement              |
 

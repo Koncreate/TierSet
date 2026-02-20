@@ -1,5 +1,10 @@
 # TierBoard Architecture Overview
 
+> **Automerge Reference:** For correct CRDT patterns and React integration, see [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt). Key patterns:
+> - Use `useDocument()` hook: `const [doc, changeDoc] = useDocument<T>(url)`
+> - Mutate directly in callbacks: `d.items.push(item)` (NOT spread operators)
+> - Use `updateText()` for collaborative text fields
+
 ## System Architecture
 
 TierBoard is a local-first, serverless P2P multiplayer tier list application built with modern web technologies. The system operates entirely offline after initial installation, using WebRTC for peer-to-peer connectivity and Automerge CRDT for conflict-free collaborative editing.
@@ -36,10 +41,10 @@ The application uses a layered architecture with clear separation of concerns:
 
 ### Data Flow
 
-- **Local Edits**: User actions → Automerge change() → local doc update
+- **Local Edits**: User actions → `changeDoc(callback)` → local doc update
 - **Sync**: CRDT merge across peers via WebRTC data channels
 - **Persistence**: Automatic IndexedDB storage via Automerge repo
-- **UI Updates**: Reactive subscription to doc changes
+- **UI Updates**: Reactive subscription to doc changes via `useDocument()` hook
 
 ### Key Features
 
@@ -48,6 +53,7 @@ The application uses a layered architecture with clear separation of concerns:
 - **Visual Customization**: Room-level themes and personal preferences
 - **Multiplayer**: P2P join via QR codes and shareable links
 - **Offline-first**: Works without internet after initial load
+- **Adjustable Layout**: React Split Pane allows resizing between tier list and tournament sections. This layout preference is client-side only and will not persist through P2P sync.
 
 ### Security Model
 

@@ -78,7 +78,7 @@ src/
 ## Key Technologies
 
 - **TanStack Start** - Full-stack React framework
-- **Automerge** - CRDT for conflict-free sync
+- **Automerge** - CRDT for conflict-free sync. See `docs/llms/automerge-llms.txt` for patterns.
 - **WebRTC** - Peer-to-peer data channels
 - **IndexedDB/Dexie** - Local storage
 - **Zod** - Runtime validation
@@ -117,6 +117,7 @@ The signaling server is implemented using TanStack Start server functions:
 
 ## Documentation
 
+- `docs/llms/automerge-llms.txt` - **Canonical Automerge patterns** (read this first for CRDT usage)
 - `docs/api.md` - Full API architecture
 - `docs/P2P-SIGNALING-IMPLEMENTATION.md` - Signaling implementation details
 - `docs/NAT-ICE.md` - WebRTC NAT traversal

@@ -1,59 +1,76 @@
 import { z } from "zod";
-import { isCuid } from "@paralleldrive/cuid2";
 
-const cuidRefinement = (value: string) => isCuid(value);
+// Accept both UUID and cuid2 formats for peer IDs
+const peerIdSchema = z.string().min(1).max(50);
+const boardIdSchema = z.string().min(1).max(50);
 
 /**
  * P2P Message Types
  */
 export const SyncMessageSchema = z.object({
   type: z.literal("sync"),
-  boardId: z.string().refine(cuidRefinement, "Invalid board ID"),
-  delta: z.instanceof(Uint8Array, "Delta must be binary"),
+  boardId: boardIdSchema,
+  delta: z.instanceof(Uint8Array),
   timestamp: z.number(),
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  senderId: peerIdSchema,
   sequence: z.number().int().positive("Sequence must be positive"),
+  isFullDocument: z.boolean().optional(),
+});
+
+export const SyncRequestMessageSchema = z.object({
+  type: z.literal("sync:request"),
+  boardId: boardIdSchema,
+  timestamp: z.number(),
+  senderId: peerIdSchema,
+});
+
+export const FullSyncMessageSchema = z.object({
+  type: z.literal("fullsync"),
+  boardId: boardIdSchema,
+  document: z.instanceof(Uint8Array),
+  timestamp: z.number(),
+  senderId: peerIdSchema,
 });
 
 export const ChatMessageSchema = z.object({
   type: z.literal("chat"),
-  boardId: z.string().refine(cuidRefinement, "Invalid board ID"),
+  boardId: boardIdSchema,
   content: z.string().min(1, "Message cannot be empty").max(500, "Message too long"),
   timestamp: z.number(),
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  senderId: peerIdSchema,
 });
 
 export const PeerJoinMessageSchema = z.object({
   type: z.literal("peer:join"),
-  peerId: z.string().refine(cuidRefinement, "Invalid peer ID"),
+  peerId: peerIdSchema,
   peerName: z.string().min(1).max(50),
   timestamp: z.number(),
 });
 
 export const PeerLeaveMessageSchema = z.object({
   type: z.literal("peer:leave"),
-  peerId: z.string().refine(cuidRefinement, "Invalid peer ID"),
+  peerId: peerIdSchema,
   timestamp: z.number(),
 });
 
 export const HandshakeOfferSchema = z.object({
   type: z.literal("handshake:offer"),
   offer: z.any(), // RTCSessionDescriptionInit
-  boardId: z.string().refine(cuidRefinement, "Invalid board ID"),
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  boardId: boardIdSchema,
+  senderId: peerIdSchema,
 });
 
 export const HandshakeAnswerSchema = z.object({
   type: z.literal("handshake:answer"),
   answer: z.any(), // RTCSessionDescriptionInit
-  boardId: z.string().refine(cuidRefinement, "Invalid board ID"),
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  boardId: boardIdSchema,
+  senderId: peerIdSchema,
 });
 
 export const IceCandidateSchema = z.object({
   type: z.literal("ice:candidate"),
   candidate: z.any(), // RTCIceCandidateInit
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  senderId: peerIdSchema,
 });
 
 export const ImageChunkSchema = z.object({
@@ -62,23 +79,32 @@ export const ImageChunkSchema = z.object({
   chunkIndex: z.number().int().nonnegative(),
   totalChunks: z.number().int().positive(),
   data: z.instanceof(Uint8Array),
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  senderId: peerIdSchema,
 });
 
 export const ImageRequestSchema = z.object({
   type: z.literal("image:request"),
   imageId: z.string(),
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  senderId: peerIdSchema,
 });
 
 export const ImageCompleteSchema = z.object({
   type: z.literal("image:complete"),
   imageId: z.string(),
-  senderId: z.string().refine(cuidRefinement, "Invalid sender ID"),
+  senderId: peerIdSchema,
+});
+
+export const AutomergeMessageSchema = z.object({
+  type: z.literal("automerge"),
+  targetPeerId: peerIdSchema,
+  timestamp: z.number(),
+  senderId: peerIdSchema,
 });
 
 export const P2PMessageSchema = z.discriminatedUnion("type", [
   SyncMessageSchema,
+  SyncRequestMessageSchema,
+  FullSyncMessageSchema,
   ChatMessageSchema,
   PeerJoinMessageSchema,
   PeerLeaveMessageSchema,
@@ -88,10 +114,13 @@ export const P2PMessageSchema = z.discriminatedUnion("type", [
   ImageChunkSchema,
   ImageRequestSchema,
   ImageCompleteSchema,
+  AutomergeMessageSchema,
 ]);
 
 export type P2PMessage = z.infer<typeof P2PMessageSchema>;
 export type SyncMessage = z.infer<typeof SyncMessageSchema>;
+export type SyncRequestMessage = z.infer<typeof SyncRequestMessageSchema>;
+export type FullSyncMessage = z.infer<typeof FullSyncMessageSchema>;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type PeerJoinMessage = z.infer<typeof PeerJoinMessageSchema>;
 export type PeerLeaveMessage = z.infer<typeof PeerLeaveMessageSchema>;
@@ -101,6 +130,7 @@ export type IceCandidateMessage = z.infer<typeof IceCandidateSchema>;
 export type ImageChunkMessage = z.infer<typeof ImageChunkSchema>;
 export type ImageRequestMessage = z.infer<typeof ImageRequestSchema>;
 export type ImageCompleteMessage = z.infer<typeof ImageCompleteSchema>;
+export type AutomergeMessage = z.infer<typeof AutomergeMessageSchema>;
 
 /**
  * Connection Quality

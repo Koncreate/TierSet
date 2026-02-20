@@ -10,7 +10,7 @@ import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 
 import StoreDevtools from "../lib/demo-store-devtools";
 
-import { getLocale } from "#/paraglide/runtime";
+import { AutomergeRepoProvider } from "../lib/automerge/AutomergeRepoProvider";
 
 import appCss from "../styles.css?url";
 
@@ -21,14 +21,6 @@ interface MyRouterContext {
 }
 
 export const Route = createRootRouteWithContext<MyRouterContext>()({
-  beforeLoad: async () => {
-    // Other redirect strategies are possible; see
-    // https://github.com/TanStack/router/tree/main/examples/react/i18n-paraglide#offline-redirect
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("lang", getLocale());
-    }
-  },
-
   head: () => ({
     meta: [
       {
@@ -39,7 +31,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "TanStack Start Starter",
+        title: "TierBoard",
       },
     ],
     links: [
@@ -53,28 +45,31 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  // Always use "en" for SSR to ensure hydration match
   return (
-    <html lang={getLocale()}>
+    <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
         <TanStackQueryProvider>
-          <Header />
-          {children}
-          <TanStackDevtools
-            config={{
-              position: "bottom-right",
-            }}
-            plugins={[
-              {
-                name: "Tanstack Router",
-                render: <TanStackRouterDevtoolsPanel />,
-              },
-              TanStackQueryDevtools,
-              StoreDevtools,
-            ]}
-          />
+          <AutomergeRepoProvider>
+            <Header />
+            {children}
+            <TanStackDevtools
+              config={{
+                position: "bottom-right",
+              }}
+              plugins={[
+                {
+                  name: "Tanstack Router",
+                  render: <TanStackRouterDevtoolsPanel />,
+                },
+                TanStackQueryDevtools,
+                StoreDevtools,
+              ]}
+            />
+          </AutomergeRepoProvider>
         </TanStackQueryProvider>
         <Scripts />
       </body>

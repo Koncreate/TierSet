@@ -1,10 +1,10 @@
-import * as A from "@automerge/automerge";
 import type { BoardDocument, BoardChangeFn } from "./types";
 import { safeValidateBoardDocument } from "./validation";
 import { createId } from "../ids";
 
 /**
  * Create a new board document with default values
+ * Note: All fields must have non-undefined values for Automerge compatibility
  */
 export function createBoardDocument(
   partial: Partial<BoardDocument> & { name: string; createdBy: string },
@@ -13,7 +13,7 @@ export function createBoardDocument(
   const doc: BoardDocument = {
     id: partial.id || createId(),
     name: partial.name,
-    description: partial.description,
+    description: partial.description || "",
     createdAt: now,
     updatedAt: now,
     createdBy: partial.createdBy,
@@ -34,7 +34,7 @@ export function createBoardDocument(
     throw new Error(`Invalid board document: ${result.error.message}`);
   }
 
-  return result.data;
+  return doc;
 }
 
 /**
@@ -59,77 +59,4 @@ export function getDefaultTiers() {
     itemIds: [],
     createdAt: now + index,
   }));
-}
-
-/**
- * Apply a change to a board document using Automerge
- */
-export function changeBoardDocument(doc: BoardDocument, callback: BoardChangeFn): BoardDocument {
-  return A.change(doc, callback);
-}
-
-/**
- * Get binary delta for syncing
- */
-export function getDocumentDelta(doc: BoardDocument): Uint8Array {
-  return A.save(doc);
-}
-
-/**
- * Load document from binary
- */
-export function loadDocumentFromBinary(binary: Uint8Array): BoardDocument | null {
-  try {
-    const doc = A.load<BoardDocument>(binary);
-    const result = safeValidateBoardDocument(doc);
-    if (!result.success) {
-      console.error("Invalid document from binary:", result.error);
-      return null;
-    }
-    return result.data;
-  } catch (error) {
-    console.error("Failed to load document from binary:", error);
-    return null;
-  }
-}
-
-/**
- * Merge remote changes into local document
- */
-export function mergeDocumentChanges(
-  local: BoardDocument,
-  remoteBinary: Uint8Array,
-): BoardDocument | null {
-  try {
-    // Load remote document
-    const remote = A.load<BoardDocument>(remoteBinary);
-
-    // Merge with local
-    const merged = A.merge(local, remote);
-
-    // Validate result
-    const result = safeValidateBoardDocument(merged);
-    if (!result.success) {
-      console.error("Merge produced invalid document:", result.error);
-      return null;
-    }
-
-    return result.data;
-  } catch (error) {
-    console.error("Failed to merge document:", error);
-    return null;
-  }
-}
-
-/**
- * Validate a binary delta before applying
- */
-export function validateDocumentDelta(binary: Uint8Array): boolean {
-  try {
-    const doc = A.load<BoardDocument>(binary);
-    const result = safeValidateBoardDocument(doc);
-    return result.success;
-  } catch {
-    return false;
-  }
 }

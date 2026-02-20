@@ -1,5 +1,10 @@
 # TierBoard API Architecture
 
+> **Automerge Reference:** For correct CRDT patterns and React integration, see [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt). Key patterns:
+> - Use `useDocument()` hook: `const [doc, changeDoc] = useDocument<T>(url)`
+> - Mutate directly in callbacks: `changeDoc(d => d.items.push(item))` (NOT spread operators)
+> - Use `updateText()` for collaborative text: `updateText(d, ['tasks', index, 'title'], newValue)`
+
 ## Core Principle: P2P-First Design
 
 **All data synchronization happens peer-to-peer via WebRTC.** No central server, no cloud APIs, no external dependencies after initial load.
@@ -100,6 +105,8 @@ export class P2PNetwork {
 
 **Purpose:** Automerge schema, CRDT operations, document types
 
+> **Important:** In React components, use the `@automerge/react` hooks (`useDocument`, `useRepo`) instead of the low-level Automerge APIs. See [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt) for canonical patterns.
+
 ```typescript
 // src/lib/documents/index.ts
 export { BoardDocument } from "./BoardDocument";
@@ -177,16 +184,20 @@ export class BoardDocument {
 **P2P Sync Flow:**
 
 ```
-User Action → BoardDocument.change() → Automerge generates delta
+User Action → changeDoc(callback) → Automerge generates delta
            → SyncEngine.broadcast() → WebRTC to all peers
-           → Peer receives → BoardDocument.merge() → UI updates
+           → Peer receives → mergeDocumentChanges() → UI updates
 ```
+
+> **Note:** In React, use `changeDoc()` from `useDocument()` hook. Do NOT use spread operators like `d.items = [...d.items, item]` - this breaks collaborative merging. Instead, mutate directly: `d.items.push(item)`. See [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt) for details.
 
 ---
 
 ### 3. Storage Layer (`src/lib/storage/`)
 
 **Purpose:** IndexedDB persistence, image/blob storage, local cache
+
+> **Note:** Some UI state is client-side only and does not persist through P2P sync. This includes layout preferences like split pane positions between tier list and tournament sections. Such data is stored locally using React state or localStorage and is not synchronized to peers.
 
 ```typescript
 // src/lib/storage/index.ts
@@ -315,12 +326,12 @@ ConnectionStatus.tsx; // P2P connection indicator
 
 ```typescript
 // src/components/tier-list/TierList.tsx
-import { useBoardDocument } from '#/hooks/useBoardDocument';
+import { useDocument } from "@automerge/react";
 import { useP2PNetwork } from '#/hooks/useP2PNetwork';
 
-export function TierList({ boardId }: { boardId: BoardId }) {
+export function TierList({ docUrl }: { docUrl: string }) {
   // Subscribe to Automerge document (reactive updates)
-  const { doc, change } = useBoardDocument(boardId);
+  const [doc, changeDoc] = useDocument<BoardDocument>(docUrl);
 
   // Get P2P network status
   const { peers, status } = useP2PNetwork();
@@ -329,12 +340,14 @@ export function TierList({ boardId }: { boardId: BoardId }) {
   const handleDragEnd = (event: DragEndEvent) => {
     const { itemId, targetTierId } = event;
 
-    // Apply change to Automerge document
-    change((d) => {
-      // Remove from old tier
+    // Apply change to Automerge document using changeDoc()
+    // IMPORTANT: Mutate directly, don't use spread operators
+    changeDoc((d) => {
+      // Remove from old tier (mutate, don't reassign)
       const sourceTier = d.tiers.find(t => t.itemIds.includes(itemId));
       if (sourceTier) {
-        sourceTier.itemIds = sourceTier.itemIds.filter(id => id !== itemId);
+        const idx = sourceTier.itemIds.indexOf(itemId);
+        if (idx > -1) sourceTier.itemIds.splice(idx, 1);
       }
 
       // Add to new tier
@@ -364,16 +377,22 @@ export function TierList({ boardId }: { boardId: BoardId }) {
 
 **Key Principles:**
 
-- Components subscribe to Automerge documents (reactive)
-- All mutations go through `change()` (triggers P2P sync)
+- Components subscribe to Automerge documents via `useDocument()` hook
+- All mutations go through `changeDoc()` (triggers P2P sync automatically)
+- **CRITICAL**: Mutate directly in callbacks (`d.items.push(item)`), NEVER use spread operators (`d.items = [...d.items, item]`)
+- Use `updateText()` from `@automerge/react` for collaborative text fields
 - No direct API calls in components
 - P2P status shown via hooks (not direct network access)
+
+> See [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt) for complete Automerge patterns.
 
 ---
 
 ### 5. Hooks Layer (`src/hooks/`)
 
 **Purpose:** React hooks for P2P, documents, storage
+
+> **Note:** The primary hook for document management is `useDocument()` from `@automerge/react`. See [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt) for the canonical React integration patterns.
 
 ```typescript
 // src/hooks/index.ts
@@ -383,40 +402,18 @@ export { useImageStore } from "./useImageStore";
 export { usePeerPresence } from "./usePeerPresence";
 
 // src/hooks/useBoardDocument.ts
-export function useBoardDocument(boardId: BoardId) {
-  const [doc, setDoc] = useState<BoardDocument | null>(null);
+// Wraps @automerge/react's useDocument with P2P sync integration
+export function useBoardDocument(docUrl: string) {
+  const [doc, changeDoc] = useDocument<BoardDocument>(docUrl);
   const network = useP2PNetwork();
 
-  // Load from storage on mount
+  // Sync changes to P2P network when document changes
   useEffect(() => {
-    Storage.getBoard(boardId).then(setDoc);
-  }, [boardId]);
-
-  // Subscribe to P2P sync updates
-  useEffect(() => {
-    if (!network) return;
-
-    const unsubscribe = network.onSync((delta) => {
-      const updated = BoardDocument.merge(doc, delta);
-      setDoc(updated);
-      Storage.saveBoard(boardId, updated);
-    });
-
-    return unsubscribe;
+    if (!network || !doc) return;
+    // Document changes are automatically synced via Automerge's built-in sync
   }, [network, doc]);
 
-  // Change function (auto-syncs to peers)
-  const change = useCallback(
-    (callback: ChangeFn) => {
-      const updated = BoardDocument.change(doc, callback);
-      setDoc(updated);
-      Storage.saveBoard(boardId, updated);
-      network?.broadcast(updated);
-    },
-    [doc, network, boardId],
-  );
-
-  return { doc, change, isLoading: !doc };
+  return { doc, changeDoc, isLoading: !doc };
 }
 
 // src/hooks/useP2PNetwork.ts
@@ -690,8 +687,8 @@ export class ChatVotingService {
        │
        ▼
 ┌─────────────────┐
-│ useBoardDocument│
-│ .change()       │
+│ changeDoc()     │  ← From useDocument() hook
+│ (mutate d.xxx)  │  ← Direct mutation, NOT spread operators!
 └──────┬──────────┘
        │
        ├──────────────────┐
@@ -699,7 +696,7 @@ export class ChatVotingService {
        ▼                  ▼
 ┌──────────────┐   ┌──────────────┐
 │  IndexedDB   │   │ SyncEngine   │
-│  (Persist)   │   │ .broadcast() │
+│  (Auto-save) │   │ .broadcast() │
 └──────────────┘   └──────┬───────┘
                           │
                           ▼
@@ -725,8 +722,8 @@ export class ChatVotingService {
        │
        ▼
 ┌──────────────┐
-│ BoardDocument│
-│ .merge()     │
+│ Automerge    │
+│ auto-merge   │  ← Automerge handles conflicts automatically
 └──────┬───────┘
        │
        ├──────────────────┐
@@ -772,8 +769,8 @@ export class ChatVotingService {
        │
        ▼
 ┌──────────────┐
-│ BoardDocument│
-│ .change()    │
+│ changeDoc()  │  ← From useDocument() hook
+│ (mutate doc) │  ← Direct mutation pattern
 └──────┬───────┘
        │
        ▼
@@ -791,23 +788,24 @@ export class ChatVotingService {
 
 ```typescript
 // ✅ GOOD: P2P data stays in Automerge
-const board = BoardDocument.create({ name: "My Tier List" });
-Storage.saveBoard(board.id, board); // Local only
-network.broadcast(board); // P2P only
+const [doc, changeDoc] = useDocument<BoardDocument>(docUrl);
+Storage.saveBoard(doc.id, doc); // Local only
+network.broadcast(doc); // P2P only
 
 // ❌ BAD: Sending P2P data to external API
 fetch("https://api.example.com/boards", {
   method: "POST",
-  body: JSON.stringify(board), // NEVER do this
+  body: JSON.stringify(doc), // NEVER do this
 });
 
 // ✅ GOOD: External data requires user confirmation
 const chatVote = parseChatVote(message);
 showPendingVote(chatVote); // Local UI only
 
-// User clicks "Confirm"
-BoardDocument.change(doc, (d) => {
-  // NOW apply to P2P doc
+// User clicks "Confirm" - use changeDoc() to apply
+changeDoc((d) => {
+  // Mutate directly, NOT with spread operators
+  d.tiers[0].itemIds.push(vote.itemId);
 });
 ```
 
@@ -848,19 +846,18 @@ class SyncEngine {
 
     // Validate delta format
     try {
-      BoardDocument.validateDelta(delta);
+      // Automerge validates during sync
+      // Document will auto-merge via Automerge's built-in sync protocol
     } catch (e) {
       console.error("Invalid delta from peer", peerId);
       this.kickPeer(peerId);
       return;
     }
-
-    // Apply merge
-    const doc = BoardDocument.merge(this.doc, delta);
-    this.doc = doc;
   }
 }
 ```
+
+> **Note:** Automerge's sync protocol handles merging automatically. For React integration patterns, see [`docs/llms/automerge-llms.txt`](./llms/automerge-llms.txt).
 
 ---
 
@@ -1035,36 +1032,17 @@ import ContentLoader from "#vendor/react-content-loader";
 ```typescript
 // src/lib/documents/__tests__/BoardDocument.test.ts
 import { describe, it, expect } from "vitest";
-import { BoardDocument } from "../BoardDocument";
+import { createBoardDocument } from "../BoardDocument";
 
 describe("BoardDocument", () => {
   it("should create a new board", () => {
-    const doc = BoardDocument.create({ name: "Test" });
+    const doc = createBoardDocument({ name: "Test", createdBy: "user1" });
     expect(doc.name).toBe("Test");
-    expect(doc.tiers).toHaveLength(0);
+    expect(doc.tiers).toHaveLength(6); // S, A, B, C, D, F
   });
 
-  it("should apply changes", () => {
-    const doc = BoardDocument.create({ name: "Test" });
-    const updated = BoardDocument.change(doc, (d) => {
-      d.name = "Updated";
-    });
-    expect(updated.name).toBe("Updated");
-  });
-
-  it("should merge concurrent changes", () => {
-    const doc1 = BoardDocument.create({ name: "Test" });
-    const doc2 = BoardDocument.change(doc1, (d) => {
-      d.name = "Peer1";
-    });
-    const doc3 = BoardDocument.change(doc1, (d) => {
-      d.description = "Peer2";
-    });
-
-    const merged = BoardDocument.merge(doc2, BoardDocument.getDelta(doc3));
-    expect(merged.name).toBe("Peer1");
-    expect(merged.description).toBe("Peer2");
-  });
+  // Note: For React component tests with Automerge, use the @automerge/react
+  // testing patterns. See docs/llms/automerge-llms.txt for examples.
 });
 ```
 
@@ -1083,15 +1061,8 @@ describe("SyncEngine", () => {
     // Wait for connection
     await waitFor(() => client.getPeers().length > 0);
 
-    // Make change on host
-    const board = BoardDocument.create({ name: "Test" });
-    host.broadcast(BoardDocument.getDelta(board));
-
-    // Verify client received
-    await waitFor(() => {
-      const clientBoard = client.getDocument();
-      expect(clientBoard.name).toBe("Test");
-    });
+    // Sync is handled automatically by Automerge's sync protocol
+    // Document changes propagate via WebRTC data channels
   });
 });
 ```

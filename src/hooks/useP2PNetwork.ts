@@ -23,12 +23,13 @@ export function useP2PNetwork(options?: P2POptions): UseP2PNetworkReturn {
   const [network, setNetwork] = useState<P2PNetwork | null>(null);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
-  const optionsRef = useRef<P2POptions | undefined>(options);
-
-  // Store options in ref to avoid re-init on object identity changes
-  useEffect(() => {
-    optionsRef.current = options;
-  }, [options]);
+  
+  // Build options with TURN credentials from environment
+  const optionsRef = useRef<P2POptions | undefined>({
+    ...options,
+    turnToken: import.meta.env.VITE_CLOUDFLARE_TURN_TOKEN || undefined,
+    turnUsername: import.meta.env.VITE_CLOUDFLARE_TURN_USERNAME || undefined,
+  });
 
   // Initialize P2P network on mount
   useEffect(() => {

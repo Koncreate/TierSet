@@ -21,7 +21,7 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: "html",
+  reporter: process.env.VISUAL ? "html" : [["html"], ["list", { printSteps: true }]],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
@@ -29,7 +29,19 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: "on-first-retry",
+
+    /* Screenshot options for visual regression testing */
+    screenshot: {
+      mode: "only-on-failure",
+      fullPage: true,
+    },
+
+    /* Video options for debugging */
+    video: process.env.CI ? "retain-on-failure" : "off",
   },
+
+  /* Snapshot options for visual regression testing */
+  snapshotPathTemplate: "{testDir}/screenshots/{arg}{ext}",
 
   /* Configure projects for major browsers */
   projects: [
@@ -49,14 +61,31 @@ export default defineConfig({
     },
 
     /* Test against mobile viewports. */
-    // {
-    //   name: 'Mobile Chrome',
-    //   use: { ...devices['Pixel 5'] },
-    // },
-    // {
-    //   name: 'Mobile Safari',
-    //   use: { ...devices['iPhone 12'] },
-    // },
+    {
+      name: "Mobile Chrome",
+      use: { ...devices["Pixel 5"] },
+    },
+    {
+      name: "Mobile Safari",
+      use: { ...devices["iPhone 12"] },
+    },
+
+    /* Tablet viewport */
+    {
+      name: "Tablet",
+      use: { ...devices["iPad Mini"] },
+    },
+
+    /* Visual regression testing project - runs only visual tests */
+    {
+      name: "visual",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1920, height: 1080 },
+        deviceScaleFactor: 1,
+      },
+      testMatch: "**/e2e/visual/**/*.test.ts",
+    },
 
     /* Test against branded browsers. */
     // {

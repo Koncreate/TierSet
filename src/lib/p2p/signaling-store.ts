@@ -13,6 +13,7 @@ export interface SignalingRoom {
   createdAt: number;
   expiresAt: number;
   peerCount: number;
+  documentUrl?: string;  // Automerge document URL for this room
 }
 
 /**
@@ -171,6 +172,25 @@ class SignalingStore {
     room.peerCount = Math.max(0, room.peerCount - 1);
     this.rooms.set(code, room);
     return room.peerCount;
+  }
+
+  /**
+   * Set document URL for a room
+   */
+  setDocumentUrl(code: string, documentUrl: string): boolean {
+    const room = this.getRoom(code);
+    if (!room) return false;
+    room.documentUrl = documentUrl;
+    this.rooms.set(code, room);
+    return true;
+  }
+
+  /**
+   * Get document URL for a room
+   */
+  getDocumentUrl(code: string): string | null {
+    const room = this.getRoom(code);
+    return room?.documentUrl ?? null;
   }
 
   /**

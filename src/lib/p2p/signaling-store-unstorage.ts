@@ -10,6 +10,7 @@ export interface SignalingRoom {
   clientCandidates: RTCIceCandidateInit[];
   createdAt: number;
   expiresAt: number;
+  documentUrl?: string;  // Automerge document URL for this room
 }
 
 /**
@@ -33,6 +34,8 @@ export interface SignalingStore {
   decrementPeerCount(code: string): Promise<number>;
   getPeerCount(code: string): Promise<number>;
   getStats(): Promise<{ rooms: number; totalPeers: number }>;
+  setDocumentUrl(code: string, documentUrl: string): Promise<void>;
+  getDocumentUrl(code: string): Promise<string | null>;
 }
 
 /**
@@ -165,6 +168,17 @@ export function createSignalingStore(kvBinding?: KVNamespace): SignalingStore {
       }
 
       return { rooms: roomCount, totalPeers };
+    },
+
+    async setDocumentUrl(code: string, documentUrl: string): Promise<void> {
+      const room = await this.getRoom(code);
+      if (!room) return;
+      await storage.set(`room:${code}`, { ...room, documentUrl });
+    },
+
+    async getDocumentUrl(code: string): Promise<string | null> {
+      const room = await this.getRoom(code);
+      return room?.documentUrl || null;
     },
   };
 }

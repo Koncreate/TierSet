@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as BracketRouteImport } from './routes/bracket'
 import { Route as BoardRouteImport } from './routes/board'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DemoTanstackQueryRouteImport } from './routes/demo/tanstack-query'
@@ -17,6 +18,11 @@ import { Route as DemoI18nRouteImport } from './routes/demo.i18n'
 import { Route as DemoFormSimpleRouteImport } from './routes/demo/form.simple'
 import { Route as DemoFormAddressRouteImport } from './routes/demo/form.address'
 
+const BracketRoute = BracketRouteImport.update({
+  id: '/bracket',
+  path: '/bracket',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BoardRoute = BoardRouteImport.update({
   id: '/board',
   path: '/board',
@@ -56,6 +62,7 @@ const DemoFormAddressRoute = DemoFormAddressRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/board': typeof BoardRoute
+  '/bracket': typeof BracketRoute
   '/demo/i18n': typeof DemoI18nRoute
   '/demo/store': typeof DemoStoreRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/board': typeof BoardRoute
+  '/bracket': typeof BracketRoute
   '/demo/i18n': typeof DemoI18nRoute
   '/demo/store': typeof DemoStoreRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/board': typeof BoardRoute
+  '/bracket': typeof BracketRoute
   '/demo/i18n': typeof DemoI18nRoute
   '/demo/store': typeof DemoStoreRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/board'
+    | '/bracket'
     | '/demo/i18n'
     | '/demo/store'
     | '/demo/tanstack-query'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/board'
+    | '/bracket'
     | '/demo/i18n'
     | '/demo/store'
     | '/demo/tanstack-query'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/board'
+    | '/bracket'
     | '/demo/i18n'
     | '/demo/store'
     | '/demo/tanstack-query'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BoardRoute: typeof BoardRoute
+  BracketRoute: typeof BracketRoute
   DemoI18nRoute: typeof DemoI18nRoute
   DemoStoreRoute: typeof DemoStoreRoute
   DemoTanstackQueryRoute: typeof DemoTanstackQueryRoute
@@ -123,6 +136,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/bracket': {
+      id: '/bracket'
+      path: '/bracket'
+      fullPath: '/bracket'
+      preLoaderRoute: typeof BracketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/board': {
       id: '/board'
       path: '/board'
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BoardRoute: BoardRoute,
+  BracketRoute: BracketRoute,
   DemoI18nRoute: DemoI18nRoute,
   DemoStoreRoute: DemoStoreRoute,
   DemoTanstackQueryRoute: DemoTanstackQueryRoute,

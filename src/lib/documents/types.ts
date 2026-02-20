@@ -1,4 +1,4 @@
-import type * as A from "@automerge/automerge";
+import type { ChangeFn } from "@automerge/automerge";
 
 export type BoardId = string;
 export type TierId = string;
@@ -56,4 +56,8 @@ export interface BoardDocument {
   _peers: PeerState[];
 }
 
-export type BoardChangeFn = (doc: A.ChangeFn<BoardDocument>) => void;
+/**
+ * A change function for BoardDocument
+ * This is the same as Automerge's ChangeFn<BoardDocument>
+ */
+export type BoardChangeFn = ChangeFn<BoardDocument>;

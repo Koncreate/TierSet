@@ -1,13 +1,19 @@
 import { db } from "./db";
-import { boardStorage } from "./BoardStore";
+import { bracketStorage } from "./BracketStore";
 import { imageStore } from "./ImageStore";
+import { createBoardStorage, type BoardStorage } from "../board/board-storage-unstorage";
 
 /**
  * Main storage facade - combines all storage operations
  */
 export class Storage {
-  boards = boardStorage;
+  boards: BoardStorage;
+  brackets = bracketStorage;
   images = imageStore;
+
+  constructor(kvBinding?: KVNamespace) {
+    this.boards = createBoardStorage(kvBinding);
+  }
 
   /**
    * Get a preference value
@@ -80,12 +86,12 @@ export class Storage {
     imageCount: number;
     imageStorageBytes: number;
   }> {
-    const boards = await db.boards.count();
+    const boards = await this.boards.listBoards();
     const images = await db.images.count();
     const imageUsage = await this.images.getStorageUsage();
 
     return {
-      boardCount: boards,
+      boardCount: boards.length,
       imageCount: images,
       imageStorageBytes: imageUsage.estimatedSize,
     };
@@ -95,10 +101,21 @@ export class Storage {
    * Clear all data (factory reset)
    */
   async clearAll(): Promise<void> {
+    // Clear board storage
+    const boardKeys = await this.boards.listBoards();
+    for (const board of boardKeys) {
+      await this.boards.deleteBoard(board.id);
+    }
+
+    // Clear Dexie stores
     await db.tables.forEach(async (table) => {
-      await table.clear();
+      if (table.name !== "boards") {
+        // Boards now handled by unstorage
+        await table.clear();
+      }
     });
   }
 }
 
+// Create storage instance - will be initialized with KV binding in Cloudflare Workers
 export const storage = new Storage();

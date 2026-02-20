@@ -1,26 +1,27 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { createBoardDocument, type BoardId } from "../../lib/documents";
+import type { BoardId } from "../../lib/documents";
 import { storage } from "../../lib/storage";
 import { useP2PNetwork } from "../../hooks/useP2PNetwork";
-import { useBoardDocument } from "../../hooks/useBoardDocument";
-import { useImageStore } from "../../hooks/useImageStore";
+import { useBoardDocument } from "../../lib/automerge";
+import { useRoomConnection } from "../../hooks/useRoomConnection";
+import { usePeerPresence } from "../../hooks/usePeerPresence";
 import { TierList } from "../tier-list/TierList";
 import { ItemGallery } from "../tier-list/ItemGallery";
 import { ConnectionStatusIndicator } from "../p2p/ConnectionStatus";
 import { RoomCodeDisplay, PeerList } from "../p2p";
 import { JoinRoomModal } from "../p2p/JoinRoomModal";
-import { ImageUploader } from "./ImageUploader";
+import { PeerPresenceBar } from "../presence/PeerPresenceBar";
+import { ImageUploader, type UploadResult } from "./ImageUploader";
 import { Plus, Share, Download, Trash, SignIn } from "@phosphor-icons/react";
 import type { PeerInfo } from "../../lib/p2p";
 
 interface BoardViewProps {
-  boardId?: BoardId;
-  onCreateBoard?: (name: string) => void;
+  boardId: BoardId;
 }
 
-export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
-  const [localBoardId, setLocalBoardId] = useState<BoardId | null>(null);
+export function BoardView({ boardId }: BoardViewProps) {
   const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [roomDocumentUrl, setRoomDocumentUrl] = useState<string | null>(null);
   const [showImageUploader, setShowImageUploader] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -36,17 +37,30 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
     closeRoom,
     getRoomCode,
   } = useP2PNetwork();
-  const { storeImage } = useImageStore();
 
-  // Use board document hook with P2P sync
-  const boardIdToUse = boardId ?? localBoardId;
+  const { allPeers } = usePeerPresence(network);
+
+  // Use room connection hook for Automerge Repo
+  const {
+    isConnecting: isRepoConnecting,
+    error: repoConnectionError,
+    connectToRoom,
+    disconnectFromRoom,
+    retry,
+  } = useRoomConnection();
+
+  // Use board document hook with Automerge Repo
   const {
     doc: board,
     change,
     isLoading,
-    syncStatus,
-    connectedPeers,
-  } = useBoardDocument(boardIdToUse, { network });
+    error: docError,
+    url: boardUrl,
+  } = useBoardDocument(boardId, undefined, roomDocumentUrl);
+
+  // Get connected peers count from P2P network
+  const connectedPeers = peers.length;
+  const syncStatus = status === "connected" ? "synced" : status;
 
   // Sync room code from network
   useEffect(() => {
@@ -56,7 +70,7 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
     }
   }, [getRoomCode, roomCode]);
 
-  // Handle P2P image sync
+  // Handle P2P image sync (images are not handled by Automerge, only board state)
   useEffect(() => {
     if (!network || !board) return;
 
@@ -126,30 +140,16 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
     return map;
   }, []);
 
-  // Create new board
-  const handleCreateBoard = useCallback(
-    async (name: string) => {
-      // Generate a local ID for board creation (P2P not required)
-      const localId = network?.id || crypto.randomUUID();
-
-      const boardDoc = createBoardDocument({
-        name,
-        createdBy: localId,
-      });
-
-      await storage.boards.saveBoard(boardDoc.id, boardDoc);
-      setLocalBoardId(boardDoc.id);
-      onCreateBoard?.(boardDoc.id);
-    },
-    [network, onCreateBoard],
-  );
-
-  // Move item between tiers
+  // Move item between tiers using Automerge change
   const handleItemMove = useCallback(
     async (itemId: string, fromTierId: string, toTierId: string) => {
       if (!board) return;
 
+      console.log("[BoardView] Moving item:", itemId, "from:", fromTierId, "to:", toTierId);
+
+      // Use Automerge's change function - automatically syncs to peers
       change((doc) => {
+        console.log("[BoardView] Change callback called for move");
         // Remove from source tier
         const sourceTier = doc.tiers.find((t) => t.id === fromTierId);
         if (sourceTier) {
@@ -165,35 +165,77 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
         }
 
         doc.updatedAt = Date.now();
+        console.log("[BoardView] Move completed");
       });
     },
     [board, change],
   );
 
-  // Create/join room
+  // Create room and connect Automerge Repo
   const handleCreateRoom = useCallback(async () => {
-    if (!network || !board) return;
+    if (!network || !boardUrl) return;
 
-    const { code } = await createRoom();
-    setRoomCode(code);
-  }, [network, board, createRoom]);
+    try {
+      // Create room with document URL stored on server
+      const { code } = await createRoom({ documentUrl: boardUrl });
 
-  // Handle joining room
+      // Connect Automerge Repo to the existing P2PNetwork
+      const success = await connectToRoom(network);
+
+      if (success) {
+        setRoomCode(code);
+        console.log("[BoardView] Created room with document URL:", code, boardUrl);
+      } else {
+        console.error("[BoardView] Failed to connect Automerge Repo");
+        await leaveRoom();  // Clean up P2P room if repo connection failed
+      }
+    } catch (error) {
+      console.error("[BoardView] Failed to create room:", error);
+    }
+  }, [network, createRoom, connectToRoom, leaveRoom, boardUrl]);
+
+  // Join room and connect Automerge Repo
   const handleJoinRoom = useCallback(
     async (code: string, password?: string) => {
       if (!network) return;
 
-      await joinRoom(code, password ? { password } : undefined);
-      setRoomCode(code);
+      try {
+        // Join room and get document URL from server
+        const { documentUrl } = await joinRoom(code, password ? { password } : undefined);
+
+        // Set the document URL so useBoardDocument can find the right document
+        if (documentUrl) {
+          setRoomDocumentUrl(documentUrl);
+          console.log("[BoardView] Received document URL from room:", documentUrl);
+        }
+
+        // Connect Automerge Repo to the existing P2PNetwork
+        const success = await connectToRoom(network);
+
+        if (success) {
+          setRoomCode(code);
+          console.log("[BoardView] Connected Automerge Repo to room:", code);
+        } else {
+          console.error("[BoardView] Failed to connect Automerge Repo");
+          await leaveRoom();  // Clean up P2P room if repo connection failed
+        }
+      } catch (error) {
+        console.error("[BoardView] Failed to join room:", error);
+      }
     },
-    [network, joinRoom],
+    [network, joinRoom, connectToRoom, leaveRoom],
   );
 
-  // Handle leaving room
+  // Leave room and disconnect Automerge Repo
   const handleLeaveRoom = useCallback(async () => {
+    // Disconnect Automerge Repo first
+    await disconnectFromRoom();
+
+    // Then leave P2P room
     await leaveRoom();
     setRoomCode(null);
-  }, [leaveRoom]);
+    setRoomDocumentUrl(null);  // Clear document URL
+  }, [disconnectFromRoom, leaveRoom]);
 
   // Handle kicking peer (host only)
   const handleKickPeer = useCallback(
@@ -219,56 +261,60 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
     }
   }, [network, closeRoom]);
 
-  // Handle image upload
-  const handleImageSelected = useCallback(
-    async (file: File, _croppedBlob: Blob) => {
-      const id = await storeImage(file);
+  // Handle image upload (multiple images)
+  const handleImagesSelected = useCallback(
+    async (results: UploadResult[]) => {
       setShowImageUploader(false);
 
-      // Add new item with image
-      if (!network) return;
+      if (results.length === 0 || !network) return;
 
-      change((doc) => {
-        doc.items.push({
-          id: crypto.randomUUID(),
-          name: file.name.split(".")[0] || "New Item",
-          imageId: id,
-          createdAt: Date.now(),
-          createdBy: network.id,
-          metadata: {},
-        });
-        doc.updatedAt = Date.now();
-      });
-
-      // Sync image to peers if connected
-      if (network.getStatus() === "connected") {
-        const blob = await storage.images.get(id);
-        if (blob) {
-          await network.sendImage(id, blob).catch((err) => {
-            console.error("Failed to sync image to peers:", err);
+      // Add items for each uploaded image using Automerge change
+      for (const result of results) {
+        change((doc) => {
+          doc.items.push({
+            id: crypto.randomUUID(),
+            name: result.filename.split(".")[0] || "New Item",
+            imageId: result.id,
+            createdAt: Date.now(),
+            createdBy: network.id,
+            metadata: {},
           });
+          doc.updatedAt = Date.now();
+        });
+
+        // Sync image to peers if connected (images are separate from Automerge)
+        if (network.getStatus() === "connected") {
+          const blob = await storage.images.get(result.id);
+          if (blob) {
+            await network.sendImage(result.id, blob).catch((err) => {
+              console.error("Failed to sync image to peers:", err);
+            });
+          }
         }
       }
     },
-    [network, storeImage, change],
+    [network, change],
   );
 
-  // Add new item manually
+  // Add new item manually using Automerge change
   const handleAddItem = useCallback(() => {
-    if (!network || !newItemName.trim()) return;
+    if (!newItemName.trim()) return;
 
+    console.log("[BoardView] Adding item:", newItemName.trim());
     change((doc) => {
+      console.log("[BoardView] Change callback called, items before:", doc.items.length);
       doc.items.push({
         id: crypto.randomUUID(),
         name: newItemName.trim(),
         createdAt: Date.now(),
-        createdBy: network.id,
+        createdBy: network?.id || "unknown",
         metadata: {},
       });
       doc.updatedAt = Date.now();
+      console.log("[BoardView] Items after:", doc.items.length);
     });
     setNewItemName("");
-  }, [network, newItemName, change]);
+  }, [newItemName, change, network]);
 
   // Export board
   const handleExport = useCallback(async () => {
@@ -291,10 +337,12 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
 
     if (confirm(`Are you sure you want to delete "${board.name}"?`)) {
       await storage.boards.deleteBoard(board.id);
-      setBoard(null);
+      // Navigate to home after deletion
+      window.location.href = "/";
     }
   }, [board]);
 
+  // Show loading while board loads
   if (isLoading) {
     return (
       <div
@@ -303,75 +351,44 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
           alignItems: "center",
           justifyContent: "center",
           padding: "64px",
+          minHeight: "400px",
         }}
       >
-        <div>Loading...</div>
+        <div>Loading tier list...</div>
       </div>
     );
   }
 
-  // Show create board form if no board
+  // Show error if document failed to load
+  if (docError) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "64px",
+          minHeight: "400px",
+        }}
+      >
+        <div style={{ color: "red" }}>Error: {docError.message}</div>
+      </div>
+    );
+  }
+
+  // Board should always exist now (auto-created by route)
   if (!board) {
     return (
       <div
         style={{
-          maxWidth: "600px",
-          margin: "0 auto",
-          padding: "32px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "64px",
+          minHeight: "400px",
         }}
       >
-        <h1
-          style={{
-            fontSize: "28px",
-            fontWeight: 700,
-            marginBottom: "24px",
-            textAlign: "center",
-          }}
-        >
-          Create New Tier List
-        </h1>
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-            marginBottom: "16px",
-          }}
-        >
-          <input
-            type="text"
-            value={newItemName}
-            onChange={(e) => setNewItemName(e.target.value)}
-            placeholder="Enter tier list name..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                handleCreateBoard(newItemName);
-              }
-            }}
-            style={{
-              flex: 1,
-              padding: "12px 16px",
-              fontSize: "16px",
-              border: "2px solid #e0e0e0",
-              borderRadius: "8px",
-            }}
-          />
-          <button
-            onClick={() => handleCreateBoard(newItemName)}
-            disabled={!newItemName.trim()}
-            style={{
-              padding: "12px 24px",
-              fontSize: "16px",
-              fontWeight: 600,
-              background: newItemName.trim() ? "#4CAF50" : "#ccc",
-              color: "white",
-              border: "none",
-              borderRadius: "8px",
-              cursor: newItemName.trim() ? "pointer" : "not-allowed",
-            }}
-          >
-            Create
-          </button>
-        </div>
+        <div>Creating tier list...</div>
       </div>
     );
   }
@@ -381,97 +398,133 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
       style={{
         maxWidth: "1200px",
         margin: "0 auto",
-        padding: "24px",
+        padding: "0",
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "24px",
-          flexWrap: "wrap",
-          gap: "16px",
-        }}
-      >
-        <div>
-          <h1
+      {/* Show connection error with retry option */}
+      {repoConnectionError && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "12px",
+              padding: "24px",
+              maxWidth: "400px",
+              width: "90%",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ color: "red", marginBottom: "16px" }}>
+              <p style={{ fontWeight: 600, marginBottom: "8px", fontSize: "18px" }}>Failed to connect to room</p>
+              <p style={{ fontSize: "14px", color: "#666" }}>{repoConnectionError.message}</p>
+            </div>
+            <button
+              onClick={async () => {
+                await retry();
+              }}
+              disabled={isRepoConnecting}
+              style={{
+                padding: "10px 20px",
+                background: isRepoConnecting ? "#ccc" : "#2196F3",
+                color: "white",
+                border: "none",
+                borderRadius: "6px",
+                cursor: isRepoConnecting ? "not-allowed" : "pointer",
+                fontWeight: 500,
+                fontSize: "16px",
+              }}
+            >
+              {isRepoConnecting ? "Retrying..." : "Retry Connection"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Presence bar at top */}
+      <PeerPresenceBar peers={allPeers} roomCode={roomCode} />
+
+      {/* Main content */}
+      <div style={{ padding: "24px" }}>
+        {/* Header with inline editable name */}
+        <div style={{ marginBottom: "24px" }}>
+          <input
+            type="text"
+            value={board.name}
+            onChange={(e) => {
+              console.log("[BoardView] Renaming board to:", e.target.value);
+              change((doc) => {
+                console.log("[BoardView] Change callback called for rename");
+                doc.name = e.target.value;
+                doc.updatedAt = Date.now();
+              });
+            }}
             style={{
               fontSize: "28px",
               fontWeight: 700,
-              marginBottom: "4px",
+              padding: "8px 12px",
+              border: "2px solid transparent",
+              borderRadius: "8px",
+              width: "100%",
+              maxWidth: "500px",
+              background: "transparent",
             }}
-          >
-            {board.name}
-          </h1>
+            onFocus={(e) => {
+              e.target.style.borderColor = "#2196F3";
+              e.target.style.background = "#f5f5f5";
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = "transparent";
+              e.target.style.background = "transparent";
+            }}
+            placeholder="Untitled Tier List"
+          />
           {board.description && (
-            <p style={{ color: "#666", fontSize: "14px" }}>{board.description}</p>
+            <p style={{ color: "#666", fontSize: "14px", marginTop: "8px" }}>
+              {board.description}
+            </p>
           )}
         </div>
+      </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-          }}
-        >
-          <ConnectionStatusIndicator
-            status={status}
-            peerCount={peers.length}
-            syncStatus={syncStatus}
-            connectedPeers={connectedPeers}
-          />
+      {/* Action buttons */}
+      <div
+        style={{
+          display: "flex",
+          gap: "8px",
+          marginBottom: "24px",
+          flexWrap: "wrap",
+        }}
+      >
+        <ConnectionStatusIndicator
+          status={status}
+          peerCount={peers.length}
+          syncStatus={syncStatus}
+          connectedPeers={connectedPeers}
+        />
 
-          {!roomCode ? (
-            <>
-              <button
-                onClick={handleCreateRoom}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 16px",
-                  background: "#2196F3",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                }}
-              >
-                <Share size={18} />
-                Create Room
-              </button>
-
-              <button
-                onClick={() => setShowJoinModal(true)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 16px",
-                  background: "#4CAF50",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                }}
-              >
-                <SignIn size={18} />
-                Join Room
-              </button>
-            </>
-          ) : (
+        {!roomCode ? (
+          <>
             <button
-              onClick={handleLeaveRoom}
+              onClick={handleCreateRoom}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
                 padding: "8px 16px",
-                background: "#FF4444",
+                background: "#2196F3",
                 color: "white",
                 border: "none",
                 borderRadius: "6px",
@@ -479,32 +532,32 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
                 fontWeight: 500,
               }}
             >
-              <SignIn size={18} weight="bold" />
-              Leave Room
+              <Share size={18} />
+              Create Room
             </button>
-          )}
 
+            <button
+              onClick={() => setShowJoinModal(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "8px 16px",
+                background: "#4CAF50",
+                color: "white",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontWeight: 500,
+              }}
+            >
+              <SignIn size={18} />
+              Join Room
+            </button>
+          </>
+        ) : (
           <button
-            onClick={handleExport}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "8px 16px",
-              background: "#4CAF50",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontWeight: 500,
-            }}
-          >
-            <Download size={18} />
-            Export
-          </button>
-
-          <button
-            onClick={handleDelete}
+            onClick={handleLeaveRoom}
             style={{
               display: "flex",
               alignItems: "center",
@@ -518,10 +571,48 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
               fontWeight: 500,
             }}
           >
-            <Trash size={18} />
-            Delete
+            <SignIn size={18} weight="bold" />
+            Leave Room
           </button>
-        </div>
+        )}
+
+        <button
+          onClick={handleExport}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "8px 16px",
+            background: "#4CAF50",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontWeight: 500,
+          }}
+        >
+          <Download size={18} />
+          Export
+        </button>
+
+        <button
+          onClick={handleDelete}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "8px 16px",
+            background: "#FF4444",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontWeight: 500,
+          }}
+        >
+          <Trash size={18} />
+          Delete
+        </button>
       </div>
 
       {/* Room Code */}
@@ -669,7 +760,7 @@ export function BoardView({ boardId, onCreateBoard }: BoardViewProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ marginBottom: "16px", fontSize: "20px" }}>Upload Image</h2>
-            <ImageUploader onImageSelected={handleImageSelected} />
+            <ImageUploader onImagesSelected={handleImagesSelected} />
             <button
               onClick={() => setShowImageUploader(false)}
               style={{
