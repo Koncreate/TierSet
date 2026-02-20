@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState, useCallback } from "react";
+import { type ReactNode, useEffect, useState, useCallback, useRef } from "react";
 import { Repo, RepoContext, useDocument, useRepo as useRepoFromContext } from "@automerge/react";
 import type { DocHandle, AutomergeUrl, PeerId } from "@automerge/react";
 import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
@@ -6,6 +6,7 @@ import { WebRTCNetworkAdapter } from "../p2p/WebRTCNetworkAdapter";
 import { createId } from "../ids";
 import type { BoardDocument, BoardChangeFn } from "../documents";
 import type { P2PNetwork } from "../p2p";
+import { decodeRoomCode } from "../p2p/room-code";
 
 interface AutomergeRepoProviderProps {
   children: ReactNode;
@@ -191,7 +192,7 @@ export async function disconnectRepoFromNetwork(
 export function useBoardDocument(
   boardId: string,
   initialData?: Partial<BoardDocument>,
-  documentUrl?: string | null  // Document URL from room (for clients)
+  roomCode?: string | null  // Room code with embedded document URL (for clients joining rooms)
 ): {
   doc: BoardDocument | null;
   change: (callback: BoardChangeFn) => void;
@@ -205,10 +206,57 @@ export function useBoardDocument(
   const [error, setError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [handle, setHandle] = useState<DocHandle<BoardDocument> | null>(null);
+  const previousRoomCode = useRef<string | null | undefined>(undefined);
 
-  // Initialize document - simple and deterministic
+  // Extract document URL from room code if present
+  let documentUrl: string | null = null;
+  if (roomCode) {
+    const decoded = decodeRoomCode(roomCode);
+    if (decoded) {
+      documentUrl = decoded.documentUrl;
+      console.log("[useBoardDocument] Decoded document URL from room code:", documentUrl);
+    }
+  }
+
+  // Detect when room code (and thus document URL) changes and reset state
+  useEffect(() => {
+    if (previousRoomCode.current !== roomCode) {
+      // Only reset if we haven't already loaded this document
+      const decoded = roomCode ? decodeRoomCode(roomCode) : null;
+      const newDocUrl = decoded?.documentUrl || null;
+      
+      if (newDocUrl && newDocUrl === docUrl) {
+        // Same document URL, don't reset
+        console.log("[useBoardDocument] Same document URL, skipping reset");
+        previousRoomCode.current = roomCode;
+        return;
+      }
+      
+      // Room code changed - reset state for re-initialization
+      console.log("[useBoardDocument] roomCode changed from", previousRoomCode.current, "to", roomCode);
+      setIsLoading(true);
+      setError(null);
+      setDocUrl(null);
+      setHandle(null);
+      previousRoomCode.current = roomCode;
+    }
+  }, [roomCode, docUrl]);
+
+  // Initialize document
   useEffect(() => {
     if (!repo) return;
+
+    // Skip if already initialized with same URL
+    if (documentUrl && docUrl === documentUrl && !isLoading) {
+      console.log("[useBoardDocument] Already initialized with this URL, skipping");
+      return;
+    }
+
+    // When documentUrl is null (host), only initialize once
+    if (documentUrl === null && docUrl !== null) {
+      console.log("[useBoardDocument] Host already has doc, skipping");
+      return;
+    }
 
     async function initDoc() {
       try {
@@ -218,8 +266,35 @@ export function useBoardDocument(
         if (documentUrl) {
           // Client: Use URL from room to find existing document
           url = documentUrl as AutomergeUrl;
-          docHandle = await repo.find<BoardDocument>(url);
-          console.log("[useBoardDocument] Found existing document via room URL:", url);
+          console.log("[useBoardDocument] Attempting to find document:", url);
+
+          // repo.find() starts syncing the document from peers
+          // Retry with exponential backoff if document isn't available yet
+          let lastError: Error | null = null;
+          const maxRetries = 10;
+          const baseDelay = 500; // 500ms, 1s, 2s, 4s, 8s...
+
+          for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+              docHandle = await repo.find<BoardDocument>(url);
+              console.log("[useBoardDocument] Found existing document via room URL:", url);
+              break; // Success!
+            } catch (findError: any) {
+              lastError = findError;
+              console.log(`[useBoardDocument] Attempt ${attempt + 1}/${maxRetries} failed:`, findError.message);
+
+              if (attempt < maxRetries - 1) {
+                // Wait with exponential backoff before retrying
+                const delay = baseDelay * Math.pow(2, attempt);
+                console.log(`[useBoardDocument] Retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+            }
+          }
+
+          if (!docHandle) {
+            throw new Error(`Failed to find document after ${maxRetries} attempts. Last error: ${lastError?.message}`);
+          }
         } else {
           // Host: Create new document
           const result = await getOrCreateBoardDoc(repo, boardId, initialData);

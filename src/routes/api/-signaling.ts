@@ -12,6 +12,11 @@ import {
   hashPassword,
   verifyPassword,
 } from "../../lib/p2p/room-auth";
+import {
+  encodeRoomCode,
+  decodeRoomCode,
+  extractShortCode,
+} from "../../lib/p2p/room-code";
 
 // Cloudflare KV binding (injected by Workers runtime)
 declare const SIGNALING_KV: KVNamespace | undefined;
@@ -39,12 +44,17 @@ export const createRoom = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { peerId, password, maxPeers, ttlMs, documentUrl } = data;
 
-    // Generate room code
-    const code = generateRoomCode();
+    // Generate short code
+    const shortCode = generateRoomCode();
+    
+    // Create room code with embedded document URL (free tier: full code, pro tier: shortened later)
+    const fullCode = documentUrl 
+      ? encodeRoomCode(shortCode, documentUrl)
+      : shortCode;
 
-    // Create room config
+    // Create room config (use full code for config)
     const config = createRoomConfig({
-      code,
+      code: fullCode,
       hostId: peerId,
       maxPeers: maxPeers || 10,
       ttlMs: ttlMs || 3600000,
@@ -55,16 +65,12 @@ export const createRoom = createServerFn({ method: "POST" })
       config.passwordHash = await hashPassword(password);
     }
 
-    // Create signaling room entry
-    const room = await signalingStore.createRoom(code, peerId, config.ttlMs);
-    
-    // Store document URL if provided
-    if (documentUrl) {
-      await signalingStore.setDocumentUrl(code, documentUrl);
-    }
+    // Create signaling room entry (store under SHORT code for lookup)
+    const room = await signalingStore.createRoom(shortCode, peerId, config.ttlMs);
 
+    // Return FULL code to host (includes embedded document URL)
     return {
-      code: room.code,
+      code: fullCode,
       hostId: room.hostId,
       expiresAt: room.expiresAt,
       requiresPassword: !!config.passwordHash,
@@ -85,7 +91,10 @@ export const getRoomInfo = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { code } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code (in case it has embedded URL)
+    const shortCode = extractShortCode(code);
+    
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       throw new Error("Room not found");
     }
@@ -113,7 +122,10 @@ export const joinRoom = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { code, peerId, password } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code (in case it has embedded URL)
+    const shortCode = extractShortCode(code);
+    
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       throw new Error("Room not found");
     }
@@ -132,14 +144,21 @@ export const joinRoom = createServerFn({ method: "POST" })
       }
     }
 
-    const peerCount = await signalingStore.incrementPeerCount(code);
+    const peerCount = await signalingStore.incrementPeerCount(shortCode);
+
+    // Extract document URL from embedded room code
+    let documentUrl: string | null = null;
+    const decoded = decodeRoomCode(code);
+    if (decoded) {
+      documentUrl = decoded.documentUrl;
+    }
 
     return {
       code: room.code,
       hostId: room.hostId,
       peerCount,
       hasOffer: !!room.hostOffer,
-      documentUrl: room.documentUrl || null,  // Return document URL to client
+      documentUrl: documentUrl || null,
     };
   });
 
@@ -162,13 +181,16 @@ export const submitOffer = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { code, offer } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       throw new Error("Room not found");
     }
 
     if (offer.type === "offer") {
-      await signalingStore.setHostOffer(code, offer as RTCSessionDescriptionInit);
+      await signalingStore.setHostOffer(shortCode, offer as RTCSessionDescriptionInit);
     }
 
     return {
@@ -190,7 +212,10 @@ export const getOffer = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { code } = data;
 
-    const offer = await signalingStore.getHostOffer(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const offer = await signalingStore.getHostOffer(shortCode);
     if (!offer) {
       return { offer: null };
     }
@@ -212,13 +237,16 @@ export const submitAnswer = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { code, answer } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       throw new Error("Room not found");
     }
 
     if (answer.type === "answer") {
-      await signalingStore.setClientAnswer(code, answer as RTCSessionDescriptionInit);
+      await signalingStore.setClientAnswer(shortCode, answer as RTCSessionDescriptionInit);
     }
 
     return { success: true };
@@ -237,7 +265,10 @@ export const getAnswer = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { code } = data;
 
-    const answer = await signalingStore.getClientAnswer(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const answer = await signalingStore.getClientAnswer(shortCode);
     if (!answer) {
       return { answer: null };
     }
@@ -265,13 +296,16 @@ export const submitCandidate = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { code, candidate, from } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       // Room expired or doesn't exist - return gracefully instead of throwing
       return { success: false, error: "Room not found" };
     }
 
-    await signalingStore.addCandidate(code, candidate as RTCIceCandidateInit, from);
+    await signalingStore.addCandidate(shortCode, candidate as RTCIceCandidateInit, from);
 
     return { success: true };
   });
@@ -290,7 +324,10 @@ export const getCandidates = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { code, from } = data;
 
-    const candidates = await signalingStore.getCandidates(code, from);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const candidates = await signalingStore.getCandidates(shortCode, from);
 
     return { candidates };
   });
@@ -309,21 +346,24 @@ export const leaveRoom = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { code, peerId } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       return { success: true };
     }
 
     // If host leaves, delete room
     if (peerId === room.hostId) {
-      await signalingStore.deleteRoom(code);
+      await signalingStore.deleteRoom(shortCode);
       return { success: true, roomDeleted: true };
     }
 
-    const peerCount = await signalingStore.decrementPeerCount(code);
+    const peerCount = await signalingStore.decrementPeerCount(shortCode);
 
     if (peerCount <= 1) {
-      await signalingStore.deleteRoom(code);
+      await signalingStore.deleteRoom(shortCode);
       return { success: true, roomDeleted: true };
     }
 
@@ -345,7 +385,10 @@ export const kickPeer = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { code, peerId, hostId } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       throw new Error("Room not found");
     }
@@ -358,7 +401,7 @@ export const kickPeer = createServerFn({ method: "POST" })
       throw new Error("Cannot kick self");
     }
 
-    await signalingStore.decrementPeerCount(code);
+    await signalingStore.decrementPeerCount(shortCode);
 
     return { success: true, kickedPeerId: peerId };
   });
@@ -377,12 +420,15 @@ export const setDocumentUrl = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { code, documentUrl } = data;
 
-    const room = await signalingStore.getRoom(code);
+    // Extract short code from full room code
+    const shortCode = extractShortCode(code);
+
+    const room = await signalingStore.getRoom(shortCode);
     if (!room) {
       throw new Error("Room not found");
     }
 
-    const success = await signalingStore.setDocumentUrl(code, documentUrl);
+    const success = await signalingStore.setDocumentUrl(shortCode, documentUrl);
     return { success, documentUrl };
   });
 

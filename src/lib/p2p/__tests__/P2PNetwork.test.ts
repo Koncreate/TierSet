@@ -184,6 +184,14 @@ describe("P2PNetwork", () => {
       expect(result.room).toBe(network);
     });
 
+    it("should return full code with embedded document URL", async () => {
+      const documentUrl = "automerge:test123";
+      const result = await network.createRoom({ documentUrl });
+
+      expect(result.code).toContain("TIER-");
+      expect(result.documentUrl).toBe(documentUrl);
+    });
+
     it("should set peer as host", async () => {
       await network.createRoom();
       expect(network.getIsHost()).toBe(true);
@@ -219,6 +227,14 @@ describe("P2PNetwork", () => {
         data: expect.objectContaining({ maxPeers: 5 }),
       });
     });
+
+    it("should accept documentUrl", async () => {
+      const documentUrl = "automerge:test";
+      await network.createRoom({ documentUrl });
+      expect(mockCreateRoom).toHaveBeenCalledWith({
+        data: expect.objectContaining({ documentUrl }),
+      });
+    });
   });
 
   describe("joinRoom (Client)", () => {
@@ -226,9 +242,18 @@ describe("P2PNetwork", () => {
       mockGetOffer.mockResolvedValue({ offer: { type: "offer", sdp: "v=0" } });
     });
 
-    it("should join room", async () => {
+    it("should join room and return document URL", async () => {
       const result = await network.joinRoom("TIER-TEST");
       expect(result).toBe(network);
+    });
+
+    it("should extract document URL from embedded room code", async () => {
+      const documentUrl = "automerge:test123";
+      const fullCode = `TIER-TEST--${btoa(documentUrl)}`;
+      
+      const result = await network.joinRoom(fullCode);
+      
+      expect(result.documentUrl).toBe(documentUrl);
     });
 
     it("should set room code", async () => {
@@ -433,6 +458,19 @@ describe("P2PNetwork", () => {
       mockGetOffer.mockResolvedValue({ offer: { type: "offer", sdp: "v=0" } });
       await client.joinRoom(code);
       expect(client.getIsHost()).toBe(false);
+    });
+
+    it("should support host create with document URL and client sync", async () => {
+      const documentUrl = "automerge:test-integration";
+      const { code, documentUrl: returnedUrl } = await host.createRoom({ documentUrl });
+      
+      expect(returnedUrl).toBe(documentUrl);
+      expect(code).toContain(documentUrl.replace("automerge:", ""));
+      
+      mockGetOffer.mockResolvedValue({ offer: { type: "offer", sdp: "v=0" } });
+      const result = await client.joinRoom(code);
+      
+      expect(result.documentUrl).toBe(documentUrl);
     });
 
     it("should support image transfer", async () => {

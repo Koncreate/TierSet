@@ -21,7 +21,6 @@ interface BoardViewProps {
 
 export function BoardView({ boardId }: BoardViewProps) {
   const [roomCode, setRoomCode] = useState<string | null>(null);
-  const [roomDocumentUrl, setRoomDocumentUrl] = useState<string | null>(null);
   const [showImageUploader, setShowImageUploader] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -56,7 +55,7 @@ export function BoardView({ boardId }: BoardViewProps) {
     isLoading,
     error: docError,
     url: boardUrl,
-  } = useBoardDocument(boardId, undefined, roomDocumentUrl);
+  } = useBoardDocument(boardId, undefined, roomCode);
 
   // Get connected peers count from P2P network
   const connectedPeers = peers.length;
@@ -200,21 +199,16 @@ export function BoardView({ boardId }: BoardViewProps) {
       if (!network) return;
 
       try {
-        // Join room and get document URL from server
+        // Join room and get document URL from embedded code
         const { documentUrl } = await joinRoom(code, password ? { password } : undefined);
 
-        // Set the document URL so useBoardDocument can find the right document
-        if (documentUrl) {
-          setRoomDocumentUrl(documentUrl);
-          console.log("[BoardView] Received document URL from room:", documentUrl);
-        }
-
-        // Connect Automerge Repo to the existing P2PNetwork
+        // Connect Automerge Repo to the existing P2PNetwork FIRST
         const success = await connectToRoom(network);
 
         if (success) {
+          // Set room code (document URL is already embedded and will be decoded by useBoardDocument)
           setRoomCode(code);
-          console.log("[BoardView] Connected Automerge Repo to room:", code);
+          console.log("[BoardView] Connected Automerge Repo to room:", code, "Document URL:", documentUrl);
         } else {
           console.error("[BoardView] Failed to connect Automerge Repo");
           await leaveRoom();  // Clean up P2P room if repo connection failed
@@ -234,7 +228,6 @@ export function BoardView({ boardId }: BoardViewProps) {
     // Then leave P2P room
     await leaveRoom();
     setRoomCode(null);
-    setRoomDocumentUrl(null);  // Clear document URL
   }, [disconnectFromRoom, leaveRoom]);
 
   // Handle kicking peer (host only)

@@ -6,8 +6,8 @@ interface UseP2PNetworkReturn {
   network: P2PNetwork | null;
   peers: PeerInfo[];
   status: ConnectionStatus;
-  createRoom: (options?: { password?: string; maxPeers?: number }) => Promise<{ code: string }>;
-  joinRoom: (code: string, options?: { password?: string }) => Promise<void>;
+  createRoom: (options?: { password?: string; maxPeers?: number; documentUrl?: string }) => Promise<{ code: string; documentUrl?: string }>;
+  joinRoom: (code: string, options?: { password?: string }) => Promise<{ documentUrl?: string | null }>;
   leaveRoom: () => Promise<void>;
   kickPeer: (peerId: string) => Promise<void>;
   closeRoom: () => Promise<void>;
@@ -61,19 +61,20 @@ export function useP2PNetwork(options?: P2POptions): UseP2PNetworkReturn {
   }, []); // Empty deps - only init once
 
   // Create room as host
-  const createRoom = useCallback(async () => {
+  const createRoom = useCallback(async (options?: { password?: string; maxPeers?: number; documentUrl?: string }) => {
     if (!network) throw new Error("Network not initialized");
 
-    const { code } = await network.createRoom();
-    return { code };
+    const result = await network.createRoom(options);
+    return { code: result.code, documentUrl: result.documentUrl };
   }, [network]);
 
   // Join existing room
   const joinRoom = useCallback(
-    async (code: string) => {
+    async (code: string, options?: { password?: string }) => {
       if (!network) throw new Error("Network not initialized");
 
-      await network.joinRoom(code);
+      const result = await network.joinRoom(code, options);
+      return { documentUrl: result.documentUrl };
     },
     [network],
   );
