@@ -1,33 +1,35 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { signalingStore } from "../../../lib/p2p/signaling-store";
+import { createSignalingStore } from "../../../lib/p2p/signaling-store-unstorage";
+import type { SignalingStore } from "../../../lib/p2p/signaling-store-unstorage";
 
 describe("SignalingStore", () => {
+  let store: SignalingStore;
+
   beforeEach(() => {
-    // Clear store before each test
-    signalingStore.destroy();
+    store = createSignalingStore();
   });
 
-  afterEach(() => {
-    signalingStore.destroy();
+  afterEach(async () => {
+    // Store doesn't have a clear method, so we just create a new one each test
   });
 
   describe("createRoom", () => {
-    it("should create a new room with host info", () => {
-      const room = signalingStore.createRoom("TIER-ABC123", "host-peer-id");
+    it("should create a new room with host info", async () => {
+      const room = await store.createRoom("TIER-ABC123", "host-peer-id", 3600000);
 
       expect(room.code).toBe("TIER-ABC123");
       expect(room.hostId).toBe("host-peer-id");
       expect(room.peerCount).toBe(1);
-      expect(room.hostOffer).toBeUndefined();
-      expect(room.clientAnswer).toBeUndefined();
+      expect(room.hostOffer).toBeNull();
+      expect(room.clientAnswer).toBeNull();
       expect(room.hostCandidates).toEqual([]);
       expect(room.clientCandidates).toEqual([]);
     });
 
-    it("should set expiration time", () => {
-      const ttlMs = 3600000; // 1 hour
+    it("should set expiration time", async () => {
+      const ttlMs = 3600000;
       const now = Date.now();
-      const room = signalingStore.createRoom("TIER-TEST", "host-id", ttlMs);
+      const room = await store.createRoom("TIER-TEST", "host-id", ttlMs);
 
       expect(room.expiresAt).toBeGreaterThan(now);
       expect(room.expiresAt).toBeLessThanOrEqual(now + ttlMs);
@@ -35,27 +37,25 @@ describe("SignalingStore", () => {
   });
 
   describe("getRoom", () => {
-    it("should return room by code", () => {
-      signalingStore.createRoom("TIER-GET", "host-id");
-      const room = signalingStore.getRoom("TIER-GET");
+    it("should return room by code", async () => {
+      await store.createRoom("TIER-GET", "host-id", 3600000);
+      const room = await store.getRoom("TIER-GET");
 
       expect(room).toBeTruthy();
       expect(room?.code).toBe("TIER-GET");
     });
 
-    it("should return null for non-existent room", () => {
-      const room = signalingStore.getRoom("TIER-NONEXISTENT");
+    it("should return null for non-existent room", async () => {
+      const room = await store.getRoom("TIER-NONEXISTENT");
       expect(room).toBeNull();
     });
 
-    it("should return null for expired room", () => {
-      // Create room with very short TTL
-      signalingStore.createRoom("TIER-EXPIRE", "host-id", 1);
+    it("should return null for expired room", async () => {
+      await store.createRoom("TIER-EXPIRE", "host-id", 1);
 
-      // Wait a small amount for real time expiration
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          const expiredRoom = signalingStore.getRoom("TIER-EXPIRE");
+      await new Promise<void>((resolve) => {
+        setTimeout(async () => {
+          const expiredRoom = await store.getRoom("TIER-EXPIRE");
           expect(expiredRoom).toBeNull();
           resolve();
         }, 10);
@@ -64,44 +64,44 @@ describe("SignalingStore", () => {
   });
 
   describe("SDP offer/answer", () => {
-    it("should set and get host offer", () => {
+    it("should set and get host offer", async () => {
       const code = "TIER-OFFER";
       const offer: RTCSessionDescriptionInit = {
         type: "offer",
         sdp: "v=0\r\no=- test offer",
       };
 
-      signalingStore.createRoom(code, "host-id");
-      signalingStore.setHostOffer(code, offer);
+      await store.createRoom(code, "host-id", 3600000);
+      await store.setHostOffer(code, offer);
 
-      const retrieved = signalingStore.getHostOffer(code);
+      const retrieved = await store.getHostOffer(code);
       expect(retrieved).toEqual(offer);
     });
 
-    it("should set and get client answer", () => {
+    it("should set and get client answer", async () => {
       const code = "TIER-ANSWER";
       const answer: RTCSessionDescriptionInit = {
         type: "answer",
         sdp: "v=0\r\no=- test answer",
       };
 
-      signalingStore.createRoom(code, "host-id");
-      signalingStore.setClientAnswer(code, answer);
+      await store.createRoom(code, "host-id", 3600000);
+      await store.setClientAnswer(code, answer);
 
-      const retrieved = signalingStore.getClientAnswer(code);
+      const retrieved = await store.getClientAnswer(code);
       expect(retrieved).toEqual(answer);
     });
 
-    it("should return null for non-existent offer/answer", () => {
-      signalingStore.createRoom("TIER-EMPTY", "host-id");
+    it("should return null for non-existent offer/answer", async () => {
+      await store.createRoom("TIER-EMPTY", "host-id", 3600000);
 
-      expect(signalingStore.getHostOffer("TIER-EMPTY")).toBeNull();
-      expect(signalingStore.getClientAnswer("TIER-EMPTY")).toBeNull();
+      expect(await store.getHostOffer("TIER-EMPTY")).toBeNull();
+      expect(await store.getClientAnswer("TIER-EMPTY")).toBeNull();
     });
   });
 
   describe("ICE candidates", () => {
-    it("should add and get host candidates", () => {
+    it("should add and get host candidates", async () => {
       const code = "TIER-HOST-CAND";
       const candidate1: RTCIceCandidateInit = {
         candidate: "candidate:1 1 UDP test1",
@@ -114,17 +114,18 @@ describe("SignalingStore", () => {
         sdpMLineIndex: 0,
       };
 
-      signalingStore.createRoom(code, "host-id");
-      signalingStore.addHostCandidate(code, candidate1);
-      signalingStore.addHostCandidate(code, candidate2);
+      await store.createRoom(code, "host-id", 3600000);
+      await store.addCandidate(code, candidate1, "host");
+      await store.addCandidate(code, candidate2, "host");
 
-      const candidates = signalingStore.getHostCandidates(code);
+      // Clients get host's candidates
+      const candidates = await store.getCandidates(code, "host");
       expect(candidates).toHaveLength(2);
       expect(candidates).toContainEqual(candidate1);
       expect(candidates).toContainEqual(candidate2);
     });
 
-    it("should add and get client candidates", () => {
+    it("should add and get client candidates", async () => {
       const code = "TIER-CLIENT-CAND";
       const candidate: RTCIceCandidateInit = {
         candidate: "candidate:1 1 UDP client-test",
@@ -132,106 +133,90 @@ describe("SignalingStore", () => {
         sdpMLineIndex: 0,
       };
 
-      signalingStore.createRoom(code, "host-id");
-      signalingStore.addClientCandidate(code, candidate);
+      await store.createRoom(code, "host-id", 3600000);
+      await store.addCandidate(code, candidate, "client");
 
-      const candidates = signalingStore.getClientCandidates(code);
+      // Host gets client's candidates
+      const candidates = await store.getCandidates(code, "client");
       expect(candidates).toHaveLength(1);
       expect(candidates[0]).toEqual(candidate);
     });
 
-    it("should return empty array for non-existent candidates", () => {
-      signalingStore.createRoom("TIER-NO-CAND", "host-id");
+    it("should return empty array for non-existent candidates", async () => {
+      await store.createRoom("TIER-NO-CAND", "host-id", 3600000);
 
-      expect(signalingStore.getHostCandidates("TIER-NO-CAND")).toEqual([]);
-      expect(signalingStore.getClientCandidates("TIER-NO-CAND")).toEqual([]);
+      expect(await store.getCandidates("TIER-NO-CAND", "host")).toEqual([]);
+      expect(await store.getCandidates("TIER-NO-CAND", "client")).toEqual([]);
     });
   });
 
   describe("peer count", () => {
-    it("should increment peer count", () => {
+    it("should increment peer count", async () => {
       const code = "TIER-PEER-COUNT";
-      signalingStore.createRoom(code, "host-id");
+      await store.createRoom(code, "host-id", 3600000);
 
-      const count1 = signalingStore.incrementPeerCount(code);
-      const count2 = signalingStore.incrementPeerCount(code);
+      const count1 = await store.incrementPeerCount(code);
+      const count2 = await store.incrementPeerCount(code);
 
       expect(count1).toBe(2);
       expect(count2).toBe(3);
     });
 
-    it("should decrement peer count", () => {
+    it("should decrement peer count", async () => {
       const code = "TIER-PEER-DEC";
-      signalingStore.createRoom(code, "host-id");
-      signalingStore.incrementPeerCount(code);
-      signalingStore.incrementPeerCount(code);
+      await store.createRoom(code, "host-id", 3600000);
+      await store.incrementPeerCount(code);
+      await store.incrementPeerCount(code);
 
-      const count1 = signalingStore.decrementPeerCount(code);
-      const count2 = signalingStore.decrementPeerCount(code);
+      const count1 = await store.decrementPeerCount(code);
+      const count2 = await store.decrementPeerCount(code);
 
       expect(count1).toBe(2);
       expect(count2).toBe(1);
     });
 
-    it("should not go below zero", () => {
+    it("should not go below zero", async () => {
       const code = "TIER-PEER-ZERO";
-      signalingStore.createRoom(code, "host-id");
+      await store.createRoom(code, "host-id", 3600000);
 
-      const count = signalingStore.decrementPeerCount(code);
+      const count = await store.decrementPeerCount(code);
       expect(count).toBe(0);
     });
   });
 
   describe("deleteRoom", () => {
-    it("should delete room", () => {
+    it("should delete room", async () => {
       const code = "TIER-DELETE";
-      signalingStore.createRoom(code, "host-id");
+      await store.createRoom(code, "host-id", 3600000);
 
-      const deleted = signalingStore.deleteRoom(code);
-      expect(deleted).toBe(true);
+      await store.deleteRoom(code);
 
-      const room = signalingStore.getRoom(code);
+      const room = await store.getRoom(code);
       expect(room).toBeNull();
-    });
-
-    it("should return false for non-existent room", () => {
-      const deleted = signalingStore.deleteRoom("TIER-NONEXISTENT");
-      expect(deleted).toBe(false);
-    });
-  });
-
-  describe("cleanupExpired", () => {
-    it("should cleanup expired rooms", async () => {
-      // Create rooms with different TTLs
-      signalingStore.createRoom("TIER-SHORT", "host-id", 10);
-      signalingStore.createRoom("TIER-LONG", "host-id", 1000);
-
-      // Wait for short room to expire
-      await new Promise<void>((resolve) => {
-        setTimeout(() => {
-          // Trigger expiration check
-          signalingStore.getRoom("TIER-SHORT");
-          resolve();
-        }, 50);
-      });
-
-      const stats = signalingStore.getStats();
-
-      expect(stats.rooms).toContain("TIER-LONG");
-      expect(stats.rooms).not.toContain("TIER-SHORT");
     });
   });
 
   describe("getStats", () => {
-    it("should return room statistics", () => {
-      signalingStore.createRoom("TIER-STAT-1", "host-id");
-      signalingStore.createRoom("TIER-STAT-2", "host-id");
+    it("should return room statistics", async () => {
+      await store.createRoom("TIER-STAT-1", "host-id", 3600000);
+      await store.createRoom("TIER-STAT-2", "host-id", 3600000);
 
-      const stats = signalingStore.getStats();
+      const stats = await store.getStats();
 
-      expect(stats.roomCount).toBe(2);
-      expect(stats.rooms).toContain("TIER-STAT-1");
-      expect(stats.rooms).toContain("TIER-STAT-2");
+      expect(stats.rooms).toBe(2);
+      expect(stats.totalPeers).toBe(2);
+    });
+  });
+
+  describe("document URL", () => {
+    it("should set and get document URL", async () => {
+      const code = "TIER-DOC-URL";
+      await store.createRoom(code, "host-id", 3600000);
+
+      await store.setDocumentUrl(code, "automerge:abc123");
+      const url = await store.getDocumentUrl(code);
+
+      expect(url).toBe("automerge:abc123");
     });
   });
 });

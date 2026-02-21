@@ -20,6 +20,8 @@ export interface ProcessedImage {
  * Image storage with compression and thumbnail generation
  */
 export class ImageStore {
+  private activeUrls: Map<string, Set<string>> = new Map();
+
   /**
    * Process and store an image file
    */
@@ -110,6 +112,17 @@ export class ImageStore {
    * Unlike store(), this accepts a pre-determined ID and raw blob
    */
   async put(id: string, blob: Blob, options?: { mimeType?: string }): Promise<void> {
+    // Enforce file size limit (same as store())
+    if (blob.size > MAX_FILE_SIZE) {
+      throw new Error(`Image size exceeds maximum limit of ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+    }
+
+    // Check storage quota
+    const usage = await this.getStorageUsage();
+    if (usage.estimatedSize + blob.size > MAX_STORAGE_QUOTA) {
+      throw new Error(`Storage quota exceeded. Maximum ${MAX_STORAGE_QUOTA / (1024 * 1024)}MB allowed`);
+    }
+
     const existing = await db.images.get(id);
     const mimeType = options?.mimeType || blob.type || "image/webp";
 
@@ -142,18 +155,61 @@ export class ImageStore {
 
   /**
    * Get image URL (creates object URL)
+   * IMPORTANT: Caller must call revokeUrl() when done to prevent memory leak
    */
   async getUrl(id: string, thumbnail: boolean = false): Promise<string | null> {
     const blob = thumbnail ? await this.getThumbnail(id) : await this.get(id);
 
     if (!blob) return null;
-    return URL.createObjectURL(blob);
+    
+    const url = URL.createObjectURL(blob);
+    
+    // Track the URL for this image
+    const key = thumbnail ? `${id}:thumb` : id;
+    if (!this.activeUrls.has(key)) {
+      this.activeUrls.set(key, new Set());
+    }
+    this.activeUrls.get(key)!.add(url);
+    
+    return url;
+  }
+
+  /**
+   * Revoke an object URL to free memory
+   */
+  revokeUrl(id: string, url: string, thumbnail: boolean = false): void {
+    const key = thumbnail ? `${id}:thumb` : id;
+    const urls = this.activeUrls.get(key);
+    if (urls?.has(url)) {
+      URL.revokeObjectURL(url);
+      urls.delete(url);
+      if (urls.size === 0) {
+        this.activeUrls.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Revoke all URLs for an image
+   */
+  revokeAllUrls(id: string): void {
+    for (const key of [id, `${id}:thumb`]) {
+      const urls = this.activeUrls.get(key);
+      if (urls) {
+        for (const url of urls) {
+          URL.revokeObjectURL(url);
+        }
+        this.activeUrls.delete(key);
+      }
+    }
   }
 
   /**
    * Delete an image
    */
   async delete(id: string): Promise<void> {
+    // Revoke all active URLs for this image
+    this.revokeAllUrls(id);
     await db.images.delete(id);
   }
 

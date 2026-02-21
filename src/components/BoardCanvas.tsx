@@ -97,8 +97,8 @@ export function BoardCanvas({ doc }: BoardCanvasProps) {
     .sort((a, b) => a.order.localeCompare(b.order));
 
   return (
-    <div className="board-canvas">
-      <div className="tiers-container">
+    <div className="flex flex-col gap-5 p-5 min-h-screen bg-[#0b0b0e] text-[#e2e2d8]">
+      <div className="flex flex-col gap-2.5">
         {tiers.map((tier) => (
           <TierRow
             key={tier.id}
@@ -113,7 +113,7 @@ export function BoardCanvas({ doc }: BoardCanvasProps) {
 
       {draggedItem && (
         <div
-          className="drag-preview fixed pointer-events-none"
+          className="rotate-[5deg] opacity-80 fixed pointer-events-none"
           style={{
             position: "fixed",
             left: "var(--drag-x, 0)",
@@ -155,14 +155,14 @@ function TierRow({ tier, items, isDragging }: TierRowProps) {
   return (
     <div
       ref={ref}
-      className={`tier-row ${isOver ? "drag-over" : ""}`}
+      className={`bg-[#111116] border border-[#21212c] border-l-[3px] rounded-lg p-4 min-h-[120px] transition-colors duration-200 ${isOver ? "bg-[rgba(184,245,58,0.1)] border-[#b8f53a]" : ""}`}
       style={{ borderLeftColor: tier.color }}
     >
-      <div className="tier-header">
-        <span className="tier-label">{tier.label}</span>
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-lg font-semibold text-[#e2e2d8]">{tier.label}</span>
       </div>
 
-      <div className="tier-items">
+      <div className="flex flex-wrap gap-2">
         {sortedItems.map((item, index) => (
           <SortableItemCard key={item.id} item={item} index={index} itemsInTier={sortedItems} />
         ))}
@@ -197,9 +197,9 @@ function ItemPool({ items, isDragging }: ItemPoolProps) {
   }, []);
 
   return (
-    <div ref={ref} className={`item-pool ${isOver ? "drag-over" : ""}`}>
+    <div ref={ref} className={`bg-[#111116] border border-[#21212c] rounded-lg p-4 ${isOver ? "bg-[rgba(184,245,58,0.1)] border-[#b8f53a]" : ""}`}>
       <h3>Available Items</h3>
-      <div className="pool-items">
+      <div className="flex flex-wrap gap-2">
         {items.map((item) => (
           <DraggableItemCard key={item.id} item={item} />
         ))}
@@ -232,7 +232,7 @@ function DraggableItemCard({ item }: DraggableItemCardProps) {
   }, [item]);
 
   return (
-    <div ref={ref} className={`item-card ${isDragging ? "dragging" : ""}`}>
+    <div ref={ref} className={`bg-[#17171e] border border-[#21212c] rounded-md p-2 min-w-[120px] cursor-grab transition-all duration-200 select-none hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] ${isDragging ? "opacity-50 rotate-[5deg] shadow-[0_8px_25px_rgba(0,0,0,0.4)] cursor-grabbing" : ""}`}>
       <ItemCard item={item} />
     </div>
   );
@@ -299,7 +299,7 @@ function SortableItemCard({ item, index, itemsInTier }: SortableItemCardProps) {
   return (
     <div
       ref={ref}
-      className={`item-card ${isDragging ? "dragging" : ""} ${isOver ? "drop-target-over" : ""}`}
+      className={`bg-[#17171e] border border-[#21212c] rounded-md p-2 min-w-[120px] cursor-grab transition-all duration-200 select-none hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] ${isDragging ? "opacity-50 rotate-[5deg] shadow-[0_8px_25px_rgba(0,0,0,0.4)] cursor-grabbing" : ""} ${isOver ? "drop-target-over" : ""}`}
     >
       <ItemCard item={item} />
     </div>
@@ -313,11 +313,11 @@ interface ItemCardProps {
 
 function ItemCard({ item, isPreview }: ItemCardProps) {
   return (
-    <div className={`item-content ${isPreview ? "is-preview" : ""}`}>
+    <div className={`flex flex-col items-center gap-2 text-center ${isPreview ? "is-preview" : ""}`}>
       {item.type === "image" && item.imageId && (
-        <img src={`/api/images/${item.imageId}`} alt={item.label} className="item-image" />
+        <img src={`/api/images/${item.imageId}`} alt={item.label} className="max-w-[80px] max-h-[80px] rounded object-cover" />
       )}
-      <span className="item-label">{item.label}</span>
+      <span className="text-xs text-[#e2e2d8] break-words">{item.label}</span>
     </div>
   );
 }

@@ -218,30 +218,13 @@ export function ImageUploader({
 
   if (isProcessing) {
     return (
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "48px",
-          background: "#fafafa",
-          borderRadius: "12px",
-        }}
-      >
+      <div className="flex flex-col items-center justify-center p-12 bg-gray-50 rounded-xl">
         <div
-          style={{
-            width: "48px",
-            height: "48px",
-            border: "4px solid #e0e0e0",
-            borderTopColor: "#4CAF50",
-            borderRadius: "50%",
-            animation: "spin 1s linear infinite",
-            marginBottom: "16px",
-          }}
+          className="w-12 h-12 border-4 border-gray-200 border-t-green-500 rounded-full mb-4"
+          style={{ animation: "spin 1s linear infinite" }}
         />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <p style={{ color: "#666", fontSize: "14px" }}>{processingStatus}</p>
+        <p className="text-gray-500 text-sm">{processingStatus}</p>
       </div>
     );
   }
@@ -250,39 +233,20 @@ export function ImageUploader({
     <>
       <div
         onClick={() => setIsOpen(true)}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "32px",
-          border: "2px dashed #ccc",
-          borderRadius: "12px",
-          cursor: "pointer",
-          transition: "all 0.2s ease",
-          background: "#fafafa",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = "#999";
-          e.currentTarget.style.background = "#f0f0f0";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = "#ccc";
-          e.currentTarget.style.background = "#fafafa";
-        }}
+        className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer transition-colors bg-gray-50 hover:border-gray-500 hover:bg-gray-100"
       >
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="1.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="17 8 12 3 7 8" />
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
-        <p style={{ marginTop: "16px", fontSize: "16px", color: "#666", textAlign: "center" }}>
+        <p className="mt-4 text-base text-gray-500 text-center">
           Drop images anywhere or click to upload
         </p>
-        <p style={{ marginTop: "8px", fontSize: "14px", color: "#999" }}>
+        <p className="mt-2 text-sm text-gray-400">
           Supports: JPG, PNG, WebP, GIF, ZIP files, and folders
         </p>
-        <p style={{ marginTop: "4px", fontSize: "12px", color: "#999" }}>
+        <p className="mt-1 text-xs text-gray-400">
           Max size: {Math.round(maxFileSize / (1024 * 1024))}MB per file
         </p>
       </div>

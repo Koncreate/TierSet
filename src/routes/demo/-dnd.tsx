@@ -2,7 +2,6 @@ import React from "react";
 import { BoardCanvas } from "~/components/BoardCanvas";
 import { createId } from "~/lib/ids";
 import { generateKeyBetween } from "fractional-indexing";
-import "~/styles/dnd.css";
 
 interface Item {
   id: string;

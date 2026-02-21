@@ -48,83 +48,32 @@ export function JoinRoomModal({ isOpen, onClose, onJoin }: JoinRoomModalProps) {
 
   return (
     <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
       onClick={handleClose}
     >
       <div
-        style={{
-          background: "white",
-          borderRadius: "12px",
-          padding: "24px",
-          maxWidth: "400px",
-          width: "90%",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.15)",
-        }}
+        className="bg-white rounded-xl p-6 max-w-[400px] w-[90%] shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "20px",
-          }}
-        >
-          <h2
-            style={{
-              fontSize: "20px",
-              fontWeight: 600,
-              margin: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
+        <div className="flex justify-between items-center mb-5">
+          <h2 className="text-xl font-semibold m-0 flex items-center gap-2">
             <SignIn size={24} weight="bold" />
             Join Room
           </h2>
           <button
             onClick={handleClose}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            className="bg-transparent border-none cursor-pointer p-1 flex items-center justify-center"
             aria-label="Close"
           >
             <X size={24} />
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit}>
-          {/* Room Code Input */}
-          <div style={{ marginBottom: "16px" }}>
+          <div className="mb-4">
             <label
               htmlFor="room-code"
-              style={{
-                display: "block",
-                fontSize: "14px",
-                fontWeight: 500,
-                marginBottom: "6px",
-                color: "#374151",
-              }}
+              className="block text-sm font-medium mb-1.5 text-gray-700"
             >
               Room Code
             </label>
@@ -135,63 +84,30 @@ export function JoinRoomModal({ isOpen, onClose, onJoin }: JoinRoomModalProps) {
               onChange={(e) => setRoomCode(e.target.value)}
               placeholder="TIER-ABC123"
               autoFocus
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                fontSize: "16px",
-                border: "2px solid #e5e7eb",
-                borderRadius: "6px",
-                textTransform: "uppercase",
-                letterSpacing: "1px",
-                fontFamily: "monospace",
-              }}
+              className="w-full py-2.5 px-3 text-base border-2 border-gray-200 rounded-md uppercase tracking-wide font-mono"
             />
           </div>
 
-          {/* Password Input (optional) */}
-          <div style={{ marginBottom: "20px" }}>
+          <div className="mb-5">
             <label
               htmlFor="room-password"
-              style={{
-                display: "block",
-                fontSize: "14px",
-                fontWeight: 500,
-                marginBottom: "6px",
-                color: "#374151",
-              }}
+              className="block text-sm font-medium mb-1.5 text-gray-700"
             >
-              Password <span style={{ color: "#9ca3af" }}>(if required)</span>
+              Password <span className="text-gray-400">(if required)</span>
             </label>
-            <div style={{ position: "relative" }}>
+            <div className="relative">
               <input
                 id="room-password"
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter room password"
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  fontSize: "14px",
-                  border: "2px solid #e5e7eb",
-                  borderRadius: "6px",
-                  paddingRight: "40px",
-                }}
+                className="w-full py-2.5 px-3 text-sm border-2 border-gray-200 rounded-md pr-10"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  position: "absolute",
-                  right: "8px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "4px",
-                  color: "#6b7280",
-                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 bg-transparent border-none cursor-pointer p-1 text-gray-500"
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? (
@@ -223,42 +139,20 @@ export function JoinRoomModal({ isOpen, onClose, onJoin }: JoinRoomModalProps) {
             </div>
           </div>
 
-          {/* Error Message */}
           {error && (
-            <div
-              style={{
-                padding: "10px 12px",
-                background: "#fee2e2",
-                border: "1px solid #fecaca",
-                borderRadius: "6px",
-                color: "#dc2626",
-                fontSize: "14px",
-                marginBottom: "16px",
-              }}
-            >
+            <div className="py-2.5 px-3 bg-red-100 border border-red-200 rounded-md text-red-600 text-sm mb-4">
               {error}
             </div>
           )}
 
-          {/* Submit Button */}
           <button
             type="submit"
             disabled={!roomCode.trim() || isJoining}
-            style={{
-              width: "100%",
-              padding: "12px 16px",
-              fontSize: "16px",
-              fontWeight: 600,
-              background: roomCode.trim() && !isJoining ? "#2196F3" : "#ccc",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: roomCode.trim() && !isJoining ? "pointer" : "not-allowed",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-            }}
+            className={`w-full py-3 px-4 text-base font-semibold text-white border-none rounded-md flex items-center justify-center gap-2 ${
+              roomCode.trim() && !isJoining
+                ? "bg-[#2196F3] cursor-pointer"
+                : "bg-gray-300 cursor-not-allowed"
+            }`}
           >
             {isJoining ? (
               <>
@@ -285,16 +179,7 @@ export function JoinRoomModal({ isOpen, onClose, onJoin }: JoinRoomModalProps) {
           </button>
         </form>
 
-        {/* Help Text */}
-        <p
-          style={{
-            marginTop: "16px",
-            fontSize: "13px",
-            color: "#6b7280",
-            textAlign: "center",
-            margin: "16px 0 0",
-          }}
-        >
+        <p className="mt-4 text-[13px] text-gray-500 text-center">
           Enter the room code shared by the host. If the room is password-protected, you'll need to
           enter the password.
         </p>

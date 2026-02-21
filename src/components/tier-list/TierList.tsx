@@ -1,4 +1,3 @@
-import React from "react";
 import type { BoardDocument, BoardItem, Tier } from "../../lib/documents";
 import { TierRow } from "./TierRow";
 
@@ -9,7 +8,6 @@ interface TierListProps {
 }
 
 export function TierList({ board, itemImages, onItemMove }: TierListProps) {
-  // Get items for a specific tier
   const getItemsForTier = (tier: Tier): BoardItem[] => {
     return tier.itemIds
       .map((itemId) => board.items.find((item) => item.id === itemId))
@@ -17,18 +15,7 @@ export function TierList({ board, itemImages, onItemMove }: TierListProps) {
   };
 
   return (
-    <div
-      className="tier-list"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        padding: "16px",
-        background: "white",
-        borderRadius: "12px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-      }}
-    >
+    <div className="flex flex-col gap-2 p-4 bg-white rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
       {board.tiers.map((tier) => (
         <TierRow
           key={tier.id}

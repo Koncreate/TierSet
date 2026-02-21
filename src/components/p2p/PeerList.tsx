@@ -73,51 +73,16 @@ export function PeerList({
   };
 
   return (
-    <div
-      style={{
-        background: "white",
-        borderRadius: "12px",
-        padding: "16px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "12px",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            fontSize: "16px",
-            fontWeight: 600,
-            color: "#333",
-          }}
-        >
+    <div className="bg-white rounded-xl p-4 shadow-md">
+      <div className="flex justify-between items-center mb-3">
+        <div className="flex items-center gap-2 text-base font-semibold text-gray-700">
           <Users size={20} weight="fill" color="#666" />
           <span>Connected Peers ({peers.length})</span>
         </div>
         {isHost && onCloseRoom && (
           <button
             onClick={onCloseRoom}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "6px 12px",
-              background: "#FF4444",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "13px",
-              fontWeight: 500,
-            }}
+            className="flex items-center gap-1 py-1.5 px-3 bg-[#FF4444] text-white border-none rounded-md cursor-pointer text-[13px] font-medium"
           >
             <SignOut size={16} />
             Close Room
@@ -125,87 +90,35 @@ export function PeerList({
         )}
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "8px",
-        }}
-      >
+      <div className="flex flex-col gap-2">
         {peers.map((peer) => {
           const isCurrentUser = peer.id === currentPeerId;
 
           return (
             <div
               key={peer.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "10px 12px",
-                background: isCurrentUser ? "#e3f2fd" : "#f5f5f5",
-                borderRadius: "8px",
-                border: isCurrentUser ? "2px solid #2196F3" : "2px solid transparent",
-              }}
+              className={`flex items-center justify-between py-2.5 px-3 rounded-lg border-2 ${
+                isCurrentUser ? "bg-blue-50 border-[#2196F3]" : "bg-gray-100 border-transparent"
+              }`}
             >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                }}
-              >
+              <div className="flex items-center gap-2.5">
                 <div
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    borderRadius: "50%",
-                    background: getPeerColor(peer.role),
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "white",
-                    fontWeight: 600,
-                    fontSize: "14px",
-                  }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-sm"
+                  style={{ background: getPeerColor(peer.role) }}
                 >
                   {peer.name.charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      fontSize: "14px",
-                      fontWeight: 500,
-                      color: "#333",
-                    }}
-                  >
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
                     <span>{peer.name}</span>
                     {peer.role === "host" && <Crown size={16} weight="fill" color="#FFA502" />}
                     {isCurrentUser && (
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          color: "#666",
-                          fontStyle: "italic",
-                        }}
-                      >
+                      <span className="text-[11px] text-gray-500 italic">
                         (you)
                       </span>
                     )}
                   </div>
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#999",
-                      marginTop: "2px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
+                  <div className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-1">
                     {getConnectionQualityIcon(peer.connectionQuality, peer.iceConnectionType)}
                     <span>Connected {formatConnectionTime(peer.connectedAt)}</span>
                   </div>
@@ -215,16 +128,7 @@ export function PeerList({
               {isHost && !isCurrentUser && onKickPeer && (
                 <button
                   onClick={() => onKickPeer(peer.id)}
-                  style={{
-                    padding: "4px 8px",
-                    background: "#fff",
-                    color: "#FF4444",
-                    border: "1px solid #FF4444",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                  }}
+                  className="py-1 px-2 bg-white text-[#FF4444] border border-[#FF4444] rounded cursor-pointer text-xs font-medium"
                 >
                   Kick
                 </button>

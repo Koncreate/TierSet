@@ -254,6 +254,7 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
           if (metadata.type === "sync" && metadata.byteLength) {
             pendingSyncMetadata = metadata;
           } else if (metadata.type === "automerge") {
+            console.log("[automerge] Received metadata from:", metadata.senderId, "target:", metadata.targetPeerId);
             pendingAutomergeMetadata = metadata;
           } else {
             this.handleMessage(event.data);
@@ -278,6 +279,7 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
       } else if (pendingAutomergeMetadata) {
         // Binary data following automerge metadata
         const data = new Uint8Array(event.data);
+        console.log("[automerge] Received binary data, size:", data.length);
         this.emit("message:received", {
           type: "automerge",
           targetPeerId: pendingAutomergeMetadata.targetPeerId,
@@ -285,6 +287,7 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
           senderId: pendingAutomergeMetadata.senderId,
           data,
         });
+        console.log("[automerge] Emitted message:received event");
         pendingAutomergeMetadata = null;
       } else {
         // Other binary message
@@ -413,6 +416,15 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
     const peer = this.peers.get(message.peerId);
     if (peer) {
       this.peers.delete(message.peerId);
+      
+      // Clean up any pending images from this peer
+      for (const [key] of this.pendingImages) {
+        if (key.endsWith(`-${message.peerId}`)) {
+          this.pendingImages.delete(key);
+          console.log("[P2PNetwork] Cleaned up pending image for leaving peer:", message.peerId);
+        }
+      }
+      
       this.emit("peer:left", peer);
     }
   }
@@ -662,6 +674,11 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
     this.pendingCandidates = [];
     this.currentRoomCode = null;
     this.isHost = false;
+    this.peerSequence.clear();
+    this.pendingImages.clear();
+    this.imageBytesSent = 0;
+    this.imageBytesReceived = 0;
+    this.sequence = 0;
     this.setStatus("disconnected");
 
     // Reinitialize for next use
@@ -960,6 +977,13 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
   }
 
   /**
+   * Check if data channel is open and ready for sending
+   */
+  isDataChannelOpen(): boolean {
+    return this.dataChannel?.readyState === "open";
+  }
+
+  /**
    * Get current connection status
    */
   getStatus(): ConnectionStatus {
@@ -1122,27 +1146,36 @@ export class P2PNetwork extends EventEmitter<P2PEvents> {
 
   /**
    * Send Automerge sync message to specific peer
+   * In 1:1 mode, this broadcasts to the single connected peer
+   * In multi-peer mode, this sends to all peers (or specific peer if targetPeerId matches)
+   * 
+   * Note: We broadcast to all peers because Automerge peer IDs don't match P2PNetwork IDs.
+   * The receiving side filters based on the targetPeerId in the message metadata.
    */
   sendAutomergeMessage(targetPeerId: string, data: Uint8Array): void {
     if (!this.dataChannel || this.dataChannel.readyState !== "open") {
-      console.warn("[automerge] Cannot send - channel not ready");
+      console.warn("[automerge] Cannot send - channel not ready, state:", this.dataChannel?.readyState);
+      console.log("[automerge] Data channel:", this.dataChannel ? "exists" : "null");
+      console.log("[automerge] Peers:", Array.from(this.peers.keys()));
       return;
     }
 
     const message = {
       type: "automerge" as const,
-      targetPeerId,
+      targetPeerId,  // This is the Automerge peer ID, not P2PNetwork ID
       timestamp: Date.now(),
       senderId: this.id,
     };
 
     try {
+      console.log("[automerge] Broadcasting message to:", targetPeerId, "size:", data.length, "peers count:", this.peers.size);
       // Send metadata first
       this.dataChannel.send(JSON.stringify(message));
       // Send binary data
       this.dataChannel.send(data);
+      console.log("[automerge] Message broadcast successfully");
     } catch (error) {
-      console.error("[automerge] Send failed:", error instanceof Error ? error.message : String(error));
+      console.error("[automerge] Broadcast failed:", error instanceof Error ? error.message : String(error));
       this.emit("error", error instanceof Error ? error : new Error(String(error)));
     }
   }

@@ -3,12 +3,10 @@
  * Displays a single match in the tournament bracket
  */
 
-import React, { useRef } from "react";
-import { useButton } from "@react-aria/button";
-import { useFocusRing } from "@react-aria/focus";
-import { mergeProps } from "@react-aria/utils";
-import type { RefObject } from "react";
+import { useCallback } from "react";
+import { Button } from "react-aria-components";
 import type { BracketDocument, BracketMatch, BracketParticipant } from "../../lib/bracket/types";
+import { uiActions } from "../../stores";
 
 interface BracketMatchProps {
   match: BracketMatch;
@@ -22,11 +20,17 @@ export function BracketMatch({ match, bracket, onWinnerSelect, isEditable = fals
   const participant2 = bracket.participants.find((p) => p.id === match.participant2Id);
   const winner = bracket.participants.find((p) => p.id === match.winnerId);
 
-  const handleWinnerSelect = (winnerId: string) => {
+  const participants = [participant1, participant2].filter((p): p is BracketParticipant => p !== undefined);
+
+  const handleWinnerSelect = useCallback((winnerId: string) => {
     if (isEditable && onWinnerSelect) {
       onWinnerSelect(match.id, winnerId);
     }
-  };
+  }, [isEditable, onWinnerSelect, match.id]);
+
+  const handleDoubleClick = useCallback((participant: BracketParticipant) => {
+    uiActions.openBracketLightbox(match.id, participants, participant.id);
+  }, [match.id, participants]);
 
   return (
     <div
@@ -51,6 +55,7 @@ export function BracketMatch({ match, bracket, onWinnerSelect, isEditable = fals
         isWinner={winner?.id === participant1?.id}
         isSelected={match.winnerId === participant1?.id}
         onClick={() => participant1 && handleWinnerSelect(participant1.id)}
+        onDoubleClick={() => participant1 && handleDoubleClick(participant1)}
         disabled={!isEditable || !participant1 || match.winnerId !== null}
       />
 
@@ -64,6 +69,7 @@ export function BracketMatch({ match, bracket, onWinnerSelect, isEditable = fals
         isWinner={winner?.id === participant2?.id}
         isSelected={match.winnerId === participant2?.id}
         onClick={() => participant2 && handleWinnerSelect(participant2.id)}
+        onDoubleClick={() => participant2 && handleDoubleClick(participant2)}
         disabled={!isEditable || !participant2 || match.winnerId !== null}
       />
 
@@ -83,6 +89,7 @@ interface MatchParticipantProps {
   isWinner?: boolean;
   isSelected?: boolean;
   onClick?: () => void;
+  onDoubleClick?: () => void;
   disabled?: boolean;
 }
 
@@ -92,27 +99,13 @@ function MatchParticipant({
   isWinner,
   isSelected,
   onClick,
+  onDoubleClick,
   disabled,
 }: MatchParticipantProps) {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const { buttonProps } = useButton(
-    {
-      onClick,
-      isDisabled: disabled,
-      "aria-pressed": isSelected,
-    },
-    ref as RefObject<HTMLElement>,
-  );
-  const { isFocusVisible, focusProps } = useFocusRing();
-
-  const isPressed = false; // Simplified for now
-
   const baseClasses = `
     flex items-center justify-between gap-2 px-2 py-1.5 rounded
     transition-all duration-150
     ${disabled ? "cursor-default" : "cursor-pointer"}
-    ${isFocusVisible ? "ring-2 ring-amber-500 ring-offset-2 ring-offset-slate-800" : ""}
-    ${isPressed ? "scale-[0.98]" : ""}
   `;
 
   const stateClasses = isWinner
@@ -132,7 +125,12 @@ function MatchParticipant({
   }
 
   return (
-    <div {...mergeProps(buttonProps, focusProps, { className: `${baseClasses} ${stateClasses}` })} ref={ref}>
+    <Button
+      isDisabled={disabled}
+      onPress={onClick}
+      onDoubleClick={onDoubleClick}
+      className={`${baseClasses} ${stateClasses} w-full text-left`}
+    >
       <div className="flex items-center gap-2 flex-1 min-w-0">
         {isWinner && <span className="text-amber-400">👑</span>}
         <span className="truncate text-sm">{participant.name}</span>
@@ -140,6 +138,6 @@ function MatchParticipant({
       {score !== undefined && (
         <span className="text-xs font-mono bg-slate-700 px-2 py-0.5 rounded">{score}</span>
       )}
-    </div>
+    </Button>
   );
 }

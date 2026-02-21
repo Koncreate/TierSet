@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useCallback, useMemo } from "react";
-import { useButton } from "@react-aria/button";
+import { Button } from "react-aria-components";
 import { Trophy, Share, Download, Trash, Plus, Users } from "@phosphor-icons/react";
 import type { BracketDocument, BracketId } from "../../lib/bracket/types";
 import { createBracketDocument } from "../../lib/bracket/types";
@@ -14,11 +14,12 @@ import { RoomCodeDisplay, PeerList } from "../p2p";
 import type { PeerInfo } from "../../lib/p2p";
 
 interface BracketViewProps {
-  bracketId?: BracketId;
+  bracket?: ReturnType<typeof createBracketDocument> | null;
+  bracketId?: string;
   onCreateBracket?: (name: string) => void;
 }
 
-export function BracketView({ bracketId, onCreateBracket }: BracketViewProps) {
+export function BracketView({ bracket: bracketProp, bracketId, onCreateBracket }: BracketViewProps) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newBracketName, setNewBracketName] = useState("");
   const [participantNames, setParticipantNames] = useState<string[]>(["", ""]);
@@ -26,11 +27,13 @@ export function BracketView({ bracketId, onCreateBracket }: BracketViewProps) {
   const [roomCode] = useState<string | null>(null);
   const [peers] = useState<PeerInfo[]>([]);
 
-  // Create sample bracket for demonstration
-  const bracket: BracketDocument = useMemo(() => {
+  // Use provided bracket or create sample
+  const bracket = useMemo(() => {
+    if (bracketProp) return bracketProp;
+    
     if (bracketId) {
       // In real implementation, load from storage
-      return null as any;
+      return null;
     }
     
     // Create sample bracket for demo
@@ -41,9 +44,9 @@ export function BracketView({ bracketId, onCreateBracket }: BracketViewProps) {
         createdBy: "demo-user",
       });
     } catch {
-      return null as any;
+      return null;
     }
-  }, [bracketId]);
+  }, [bracketProp, bracketId]);
 
   const handleCreateBracket = useCallback(() => {
     if (!newBracketName.trim() || participantNames.filter((n) => n.trim()).length < 2) {
@@ -315,15 +318,13 @@ export function BracketView({ bracketId, onCreateBracket }: BracketViewProps) {
 }
 
 function CreateButton({ onClick }: { onClick: () => void }) {
-  const { buttonProps } = useButton({ onClick });
-
   return (
-    <button
-      {...buttonProps}
+    <Button
+      onPress={onClick}
       className="inline-flex items-center gap-3 px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg shadow-amber-500/25 hover:shadow-amber-500/40 hover:scale-105"
     >
       <Trophy size={24} weight="fill" />
       Create New Tournament
-    </button>
+    </Button>
   );
 }

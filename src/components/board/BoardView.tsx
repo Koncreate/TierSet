@@ -1,12 +1,19 @@
 import React, { useState, useCallback, useEffect } from "react";
+import { debounce } from "@tanstack/pacer";
 import type { BoardId } from "../../lib/documents";
 import { storage } from "../../lib/storage";
 import { useP2PNetwork } from "../../hooks/useP2PNetwork";
-import { useBoardDocument } from "../../lib/automerge";
+import { useBoardState, useRoomState, usePeerState } from "../../hooks";
 import { useRoomConnection } from "../../hooks/useRoomConnection";
 import { usePeerPresence } from "../../hooks/usePeerPresence";
+import { useHostRoom } from "../../hooks/useHostRoom";
+import { useJoinRoom } from "../../hooks/useJoinRoom";
+import { useBoardDocument } from "../../lib/automerge";
 import { TierList } from "../tier-list/TierList";
 import { ItemGallery } from "../tier-list/ItemGallery";
+import { ItemLightbox } from "../tier-list/ItemLightbox";
+import { MatchDetailsLightbox } from "../bracket/MatchDetailsLightbox";
+import { ImageEditorModal } from "../ui/ImageEditorModal";
 import { ConnectionStatusIndicator } from "../p2p/ConnectionStatus";
 import { RoomCodeDisplay, PeerList } from "../p2p";
 import { JoinRoomModal } from "../p2p/JoinRoomModal";
@@ -14,58 +21,151 @@ import { PeerPresenceBar } from "../presence/PeerPresenceBar";
 import { ImageUploader, type UploadResult } from "./ImageUploader";
 import { Plus, Share, Download, Trash, SignIn } from "@phosphor-icons/react";
 import type { PeerInfo } from "../../lib/p2p";
+import { decodeRoomCode } from "../../lib/p2p/room-code";
+import { appStore } from "../../stores";
+import { boardActions } from "../../stores/appStore.actions";
 
 interface BoardViewProps {
   boardId: BoardId;
 }
 
 export function BoardView({ boardId }: BoardViewProps) {
-  const [roomCode, setRoomCode] = useState<string | null>(null);
   const [showImageUploader, setShowImageUploader] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [boardNameInput, setBoardNameInput] = useState("");
 
+  // TanStack Store hooks
+  const {
+    board,
+    isLoading: boardLoading,
+    error: boardError,
+    syncStatus: storeSyncStatus,
+    connectedPeers,
+  } = useBoardState();
+
+  const {
+    roomCode,
+    isHost: _isHost,
+    isConnected: _isConnected,
+    isConnecting,
+    error: roomError,
+  } = useRoomState();
+
+  const {
+    allPeers,
+    peerCount,
+  } = usePeerState();
+
+  const _localPeer = usePeerPresence();
+
+  // P2P Network hook (manages network instance, updates stores on events)
   const {
     network,
-    peers,
-    status,
-    createRoom,
-    joinRoom,
-    leaveRoom,
-    kickPeer,
-    closeRoom,
     getRoomCode,
+    getIsHost,
   } = useP2PNetwork();
 
-  const { allPeers } = usePeerPresence(network);
-
-  // Use room connection hook for Automerge Repo
+  // Room connection hook
   const {
-    isConnecting: isRepoConnecting,
-    error: repoConnectionError,
     connectToRoom,
     disconnectFromRoom,
     retry,
+    error: repoConnectionError,
   } = useRoomConnection();
 
-  // Use board document hook with Automerge Repo
+  // Room creation/join hooks
+  const { createRoom: hostRoom, isCreating, error: hostError } = useHostRoom();
+  const { joinRoom: joinRoomFlow, isJoining, error: joinError } = useJoinRoom();
+
+  // Decode document URL from room code if available
+  const decodedDocumentUrl = roomCode ? decodeRoomCode(roomCode)?.documentUrl || null : null;
+
+  // Use board document hook with Automerge Repo - pass documentUrl directly
   const {
-    doc: board,
     change,
-    isLoading,
+    handle,
+    isLoading: automergeLoading,
     error: docError,
     url: boardUrl,
-  } = useBoardDocument(boardId, undefined, roomCode);
+  } = useBoardDocument(boardId, undefined, decodedDocumentUrl);
 
-  // Get connected peers count from P2P network
-  const connectedPeers = peers.length;
-  const syncStatus = status === "connected" ? "synced" : status;
+  // Debounced board name change handler (300ms)
+  const debouncedBoardNameChange = useCallback(
+    debounce((name: string) => {
+      change((doc) => {
+        doc.name = name;
+        doc.updatedAt = Date.now();
+      });
+    }, { wait: 300 }),
+    [change]
+  );
+
+  // Sync local input state with board name
+  useEffect(() => {
+    if (board?.name && board.name !== boardNameInput) {
+      setBoardNameInput(board.name);
+    }
+  }, [board?.name]);
+
+  // CRITICAL: Subscribe to DocHandle "change" event for reactive updates
+  // This ensures UI updates even when automergeBoard reference doesn't change
+  useEffect(() => {
+    if (!handle) return;
+
+    const handleChange = () => {
+      const doc = handle.docSync();
+      if (doc) {
+        boardActions.setBoard(doc);
+        console.log("[BoardView] Synced Automerge document to store via change event");
+      }
+    };
+
+    handle.on("change", handleChange);
+
+    // Initial sync
+    const initialDoc = handle.docSync();
+    if (initialDoc) {
+      boardActions.setBoard(initialDoc);
+    }
+
+    return () => {
+      handle.off("change", handleChange);
+    };
+  }, [handle]);
+
+  // Cleanup board state on unmount
+  useEffect(() => {
+    return () => {
+      boardActions.setBoard(null as any);
+      boardActions.setLoading(false);
+      boardActions.setError(null);
+      boardActions.setDocumentUrl(null);
+      console.log("[BoardView] Cleaned up board state on unmount");
+    };
+  }, []);
+
+  // Sync loading state to store
+  useEffect(() => {
+    boardActions.setLoading(automergeLoading);
+  }, [automergeLoading]);
+
+  // Sync error state to store
+  useEffect(() => {
+    boardActions.setError(docError);
+  }, [docError]);
+
+  // Sync document URL to store
+  useEffect(() => {
+    boardActions.setDocumentUrl(boardUrl);
+  }, [boardUrl]);
 
   // Sync room code from network
   useEffect(() => {
     const code = getRoomCode();
     if (code && code !== roomCode) {
-      setRoomCode(code);
+      // Room code is now managed by store, this is just for initial sync
+      console.log("[BoardView] Room code from network:", code);
     }
   }, [getRoomCode, roomCode]);
 
@@ -170,54 +270,39 @@ export function BoardView({ boardId }: BoardViewProps) {
     [board, change],
   );
 
-  // Create room and connect Automerge Repo
+  // Create room and connect Automerge Repo (HOST flow)
   const handleCreateRoom = useCallback(async () => {
     if (!network || !boardUrl) return;
 
-    try {
-      // Create room with document URL stored on server
-      const { code } = await createRoom({ documentUrl: boardUrl });
+    const { code, success } = await hostRoom({
+      network,
+      documentUrl: boardUrl,
+      connectToRoom,
+    });
 
-      // Connect Automerge Repo to the existing P2PNetwork
-      const success = await connectToRoom(network);
-
-      if (success) {
-        setRoomCode(code);
-        console.log("[BoardView] Created room with document URL:", code, boardUrl);
-      } else {
-        console.error("[BoardView] Failed to connect Automerge Repo");
-        await leaveRoom();  // Clean up P2P room if repo connection failed
-      }
-    } catch (error) {
-      console.error("[BoardView] Failed to create room:", error);
+    if (success) {
+      // Room code is now set in store automatically via actions
+      console.log("[BoardView] Created room:", code);
     }
-  }, [network, createRoom, connectToRoom, leaveRoom, boardUrl]);
+  }, [network, boardUrl, hostRoom, connectToRoom]);
 
-  // Join room and connect Automerge Repo
+  // Join room and connect Automerge Repo (CLIENT flow)
   const handleJoinRoom = useCallback(
     async (code: string, password?: string) => {
       if (!network) return;
 
-      try {
-        // Join room and get document URL from embedded code
-        const { documentUrl } = await joinRoom(code, password ? { password } : undefined);
+      const { documentUrl, success } = await joinRoomFlow({
+        code,
+        network,
+        connectToRoom,
+        password,
+      });
 
-        // Connect Automerge Repo to the existing P2PNetwork FIRST
-        const success = await connectToRoom(network);
-
-        if (success) {
-          // Set room code (document URL is already embedded and will be decoded by useBoardDocument)
-          setRoomCode(code);
-          console.log("[BoardView] Connected Automerge Repo to room:", code, "Document URL:", documentUrl);
-        } else {
-          console.error("[BoardView] Failed to connect Automerge Repo");
-          await leaveRoom();  // Clean up P2P room if repo connection failed
-        }
-      } catch (error) {
-        console.error("[BoardView] Failed to join room:", error);
+      if (success) {
+        console.log("[BoardView] Joined room:", code, "Document:", documentUrl);
       }
     },
-    [network, joinRoom, connectToRoom, leaveRoom],
+    [network, joinRoomFlow, connectToRoom],
   );
 
   // Leave room and disconnect Automerge Repo
@@ -226,33 +311,31 @@ export function BoardView({ boardId }: BoardViewProps) {
     await disconnectFromRoom();
 
     // Then leave P2P room
-    await leaveRoom();
-    setRoomCode(null);
-  }, [disconnectFromRoom, leaveRoom]);
+    await network?.leaveRoom();
+  }, [disconnectFromRoom, network]);
 
   // Handle kicking peer (host only)
   const handleKickPeer = useCallback(
     async (peerId: string) => {
       if (!network) return;
       try {
-        await kickPeer(peerId);
+        await network.kickPeer(peerId);
       } catch (error) {
         console.error("Failed to kick peer:", error);
       }
     },
-    [network, kickPeer],
+    [network],
   );
 
   // Handle closing room (host only)
   const handleCloseRoom = useCallback(async () => {
     if (!network) return;
     try {
-      await closeRoom();
-      setRoomCode(null);
+      await network.closeRoom();
     } catch (error) {
       console.error("Failed to close room:", error);
     }
-  }, [network, closeRoom]);
+  }, [network]);
 
   // Handle image upload (multiple images)
   const handleImagesSelected = useCallback(
@@ -335,36 +418,45 @@ export function BoardView({ boardId }: BoardViewProps) {
     }
   }, [board]);
 
+  // Handle image editor save
+  const handleImageEditorSave = useCallback(async (editedImageUrl: string) => {
+    const imageEditor = appStore.state.ui.imageEditor;
+    const itemId = imageEditor.itemId;
+    if (!itemId) return;
+
+    try {
+      // Convert data URL to blob
+      const response = await fetch(editedImageUrl);
+      const blob = await response.blob();
+
+      // Store the edited image in IndexedDB
+      await storage.images.put(itemId, blob);
+
+      // Sync to peers if connected
+      if (network && network.getStatus() === "connected") {
+        await network.sendImage(itemId, blob).catch((err) => {
+          console.error("Failed to sync edited image to peers:", err);
+        });
+      }
+    } catch (error) {
+      console.error("Failed to save edited image:", error);
+    }
+  }, [network]);
+
   // Show loading while board loads
-  if (isLoading) {
+  if (boardLoading || automergeLoading) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "64px",
-          minHeight: "400px",
-        }}
-      >
+      <div className="flex items-center justify-center p-16 min-h-[400px]">
         <div>Loading tier list...</div>
       </div>
     );
   }
 
   // Show error if document failed to load
-  if (docError) {
+  if (docError || boardError) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "64px",
-          minHeight: "400px",
-        }}
-      >
-        <div style={{ color: "red" }}>Error: {docError.message}</div>
+      <div className="flex items-center justify-center p-16 min-h-[400px]">
+        <div className="text-red-500">Error: {(docError || boardError)?.message}</div>
       </div>
     );
   }
@@ -372,75 +464,41 @@ export function BoardView({ boardId }: BoardViewProps) {
   // Board should always exist now (auto-created by route)
   if (!board) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "64px",
-          minHeight: "400px",
-        }}
-      >
+      <div className="flex items-center justify-center p-16 min-h-[400px]">
         <div>Creating tier list...</div>
       </div>
     );
   }
 
+  // Determine sync status - prefer store status, fallback to P2P status
+  const syncStatus = storeSyncStatus;
+
+  // Combine errors
+  const combinedError = roomError || hostError || joinError || repoConnectionError;
+  const isLoading = isCreating || isJoining || isConnecting;
+
   return (
-    <div
-      style={{
-        maxWidth: "1200px",
-        margin: "0 auto",
-        padding: "0",
-      }}
-    >
+    <div className="max-w-[1200px] mx-auto p-0">
       {/* Show connection error with retry option */}
-      {repoConnectionError && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: "12px",
-              padding: "24px",
-              maxWidth: "400px",
-              width: "90%",
-              textAlign: "center",
-            }}
-          >
-            <div style={{ color: "red", marginBottom: "16px" }}>
-              <p style={{ fontWeight: 600, marginBottom: "8px", fontSize: "18px" }}>Failed to connect to room</p>
-              <p style={{ fontSize: "14px", color: "#666" }}>{repoConnectionError.message}</p>
+      {combinedError && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-[400px] w-[90%] text-center">
+            <div className="text-red-500 mb-4">
+              <p className="font-semibold mb-2 text-lg">
+                {hostError ? "Failed to create room" : joinError ? "Failed to join room" : "Failed to connect to room"}
+              </p>
+              <p className="text-sm text-gray-500">
+                {combinedError.message}
+              </p>
             </div>
             <button
               onClick={async () => {
                 await retry();
               }}
-              disabled={isRepoConnecting}
-              style={{
-                padding: "10px 20px",
-                background: isRepoConnecting ? "#ccc" : "#2196F3",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: isRepoConnecting ? "not-allowed" : "pointer",
-                fontWeight: 500,
-                fontSize: "16px",
-              }}
+              disabled={isLoading}
+              className={`px-5 py-2.5 text-white border-none rounded-md font-medium text-base ${isLoading ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#2196F3] cursor-pointer'}`}
             >
-              {isRepoConnecting ? "Retrying..." : "Retry Connection"}
+              {isLoading ? "Retrying..." : "Retry Connection"}
             </button>
           </div>
         </div>
@@ -450,42 +508,21 @@ export function BoardView({ boardId }: BoardViewProps) {
       <PeerPresenceBar peers={allPeers} roomCode={roomCode} />
 
       {/* Main content */}
-      <div style={{ padding: "24px" }}>
+      <div className="p-6">
         {/* Header with inline editable name */}
-        <div style={{ marginBottom: "24px" }}>
+        <div className="mb-6">
           <input
             type="text"
-            value={board.name}
+            value={boardNameInput}
             onChange={(e) => {
-              console.log("[BoardView] Renaming board to:", e.target.value);
-              change((doc) => {
-                console.log("[BoardView] Change callback called for rename");
-                doc.name = e.target.value;
-                doc.updatedAt = Date.now();
-              });
+              setBoardNameInput(e.target.value);
+              debouncedBoardNameChange(e.target.value);
             }}
-            style={{
-              fontSize: "28px",
-              fontWeight: 700,
-              padding: "8px 12px",
-              border: "2px solid transparent",
-              borderRadius: "8px",
-              width: "100%",
-              maxWidth: "500px",
-              background: "transparent",
-            }}
-            onFocus={(e) => {
-              e.target.style.borderColor = "#2196F3";
-              e.target.style.background = "#f5f5f5";
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = "transparent";
-              e.target.style.background = "transparent";
-            }}
+            className="text-3xl font-bold px-3 py-2 border-2 border-transparent rounded-lg w-full max-w-[500px] bg-transparent focus:border-[#2196F3] focus:bg-gray-100 outline-none"
             placeholder="Untitled Tier List"
           />
           {board.description && (
-            <p style={{ color: "#666", fontSize: "14px", marginTop: "8px" }}>
+            <p className="text-gray-500 text-sm mt-2">
               {board.description}
             </p>
           )}
@@ -493,17 +530,10 @@ export function BoardView({ boardId }: BoardViewProps) {
       </div>
 
       {/* Action buttons */}
-      <div
-        style={{
-          display: "flex",
-          gap: "8px",
-          marginBottom: "24px",
-          flexWrap: "wrap",
-        }}
-      >
+      <div className="flex gap-2 mb-6 flex-wrap">
         <ConnectionStatusIndicator
-          status={status}
-          peerCount={peers.length}
+          status={network?.getStatus() || "disconnected"}
+          peerCount={peerCount}
           syncStatus={syncStatus}
           connectedPeers={connectedPeers}
         />
@@ -512,57 +542,26 @@ export function BoardView({ boardId }: BoardViewProps) {
           <>
             <button
               onClick={handleCreateRoom}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "8px 16px",
-                background: "#2196F3",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontWeight: 500,
-              }}
+              disabled={isCreating}
+              className={`flex items-center gap-2 px-4 py-2 text-white border-none rounded-md font-medium ${isCreating ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#2196F3] cursor-pointer'}`}
             >
               <Share size={18} />
-              Create Room
+              {isCreating ? "Creating..." : "Create Room"}
             </button>
 
             <button
               onClick={() => setShowJoinModal(true)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "8px 16px",
-                background: "#4CAF50",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontWeight: 500,
-              }}
+              disabled={isJoining}
+              className={`flex items-center gap-2 px-4 py-2 text-white border-none rounded-md font-medium ${isJoining ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#4CAF50] cursor-pointer'}`}
             >
               <SignIn size={18} />
-              Join Room
+              {isJoining ? "Joining..." : "Join Room"}
             </button>
           </>
         ) : (
           <button
             onClick={handleLeaveRoom}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "8px 16px",
-              background: "#FF4444",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontWeight: 500,
-            }}
+            className="flex items-center gap-2 px-4 py-2 text-white border-none rounded-md font-medium bg-[#FF4444] cursor-pointer"
           >
             <SignIn size={18} weight="bold" />
             Leave Room
@@ -571,18 +570,7 @@ export function BoardView({ boardId }: BoardViewProps) {
 
         <button
           onClick={handleExport}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "8px 16px",
-            background: "#4CAF50",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontWeight: 500,
-          }}
+          className="flex items-center gap-2 px-4 py-2 text-white border-none rounded-md font-medium bg-[#4CAF50] cursor-pointer"
         >
           <Download size={18} />
           Export
@@ -590,18 +578,7 @@ export function BoardView({ boardId }: BoardViewProps) {
 
         <button
           onClick={handleDelete}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "8px 16px",
-            background: "#FF4444",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontWeight: 500,
-          }}
+          className="flex items-center gap-2 px-4 py-2 text-white border-none rounded-md font-medium bg-[#FF4444] cursor-pointer"
         >
           <Trash size={18} />
           Delete
@@ -610,18 +587,18 @@ export function BoardView({ boardId }: BoardViewProps) {
 
       {/* Room Code */}
       {roomCode && (
-        <div style={{ marginBottom: "24px" }}>
+        <div className="mb-6">
           <RoomCodeDisplay code={roomCode} />
         </div>
       )}
 
       {/* Connected Peers */}
-      {roomCode && peers.length > 0 && (
-        <div style={{ marginBottom: "24px" }}>
+      {roomCode && peerCount > 1 && (
+        <div className="mb-6">
           <PeerList
-            peers={peers}
+            peers={network?.getPeers() || []}
             currentPeerId={network?.id}
-            isHost={network?.getIsHost()}
+            isHost={getIsHost()}
             onKickPeer={handleKickPeer}
             onCloseRoom={handleCloseRoom}
           />
@@ -629,28 +606,15 @@ export function BoardView({ boardId }: BoardViewProps) {
       )}
 
       {/* Add Item Section */}
-      <div
-        style={{
-          display: "flex",
-          gap: "16px",
-          marginBottom: "24px",
-          alignItems: "flex-end",
-        }}
-      >
-        <div style={{ flex: 1 }}>
+      <div className="flex gap-4 mb-6 items-end">
+        <div className="flex-1">
           <label
             htmlFor="new-item-name"
-            style={{
-              display: "block",
-              fontSize: "14px",
-              fontWeight: 500,
-              marginBottom: "4px",
-              color: "#666",
-            }}
+            className="block text-sm font-medium mb-1 text-gray-500"
           >
             Add New Item
           </label>
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div className="flex gap-2">
             <input
               id="new-item-name"
               type="text"
@@ -662,29 +626,12 @@ export function BoardView({ boardId }: BoardViewProps) {
                   handleAddItem();
                 }
               }}
-              style={{
-                flex: 1,
-                padding: "10px 14px",
-                fontSize: "14px",
-                border: "2px solid #e0e0e0",
-                borderRadius: "6px",
-              }}
+              className="flex-1 px-3.5 py-2.5 text-sm border-2 border-gray-200 rounded-md"
             />
             <button
               onClick={handleAddItem}
               disabled={!newItemName.trim()}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "10px 20px",
-                background: newItemName.trim() ? "#4CAF50" : "#ccc",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: newItemName.trim() ? "pointer" : "not-allowed",
-                fontWeight: 500,
-              }}
+              className={`flex items-center gap-2 px-5 py-2.5 text-white border-none rounded-md font-medium ${newItemName.trim() ? 'bg-[#4CAF50] cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
             >
               <Plus size={18} weight="bold" />
               Add
@@ -694,30 +641,13 @@ export function BoardView({ boardId }: BoardViewProps) {
 
         <div>
           <label
-            style={{
-              display: "block",
-              fontSize: "14px",
-              fontWeight: 500,
-              marginBottom: "4px",
-              color: "#666",
-            }}
+            className="block text-sm font-medium mb-1 text-gray-500"
           >
             Or Upload Image
           </label>
           <button
             onClick={() => setShowImageUploader(true)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "10px 20px",
-              background: "#9C27B0",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontWeight: 500,
-            }}
+            className="flex items-center gap-2 px-5 py-2.5 text-white border-none rounded-md font-medium bg-[#9C27B0] cursor-pointer"
           >
             <Plus size={18} weight="bold" />
             Upload Image
@@ -728,42 +658,18 @@ export function BoardView({ boardId }: BoardViewProps) {
       {/* Image Uploader Modal */}
       {showImageUploader && (
         <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowImageUploader(false)}
         >
           <div
-            style={{
-              background: "white",
-              borderRadius: "12px",
-              padding: "24px",
-              maxWidth: "500px",
-              width: "90%",
-            }}
+            className="bg-white rounded-xl p-6 max-w-[500px] w-[90%]"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ marginBottom: "16px", fontSize: "20px" }}>Upload Image</h2>
+            <h2 className="mb-4 text-xl">Upload Image</h2>
             <ImageUploader onImagesSelected={handleImagesSelected} />
             <button
               onClick={() => setShowImageUploader(false)}
-              style={{
-                marginTop: "16px",
-                padding: "8px 16px",
-                background: "#f5f5f5",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
+              className="mt-4 px-4 py-2 bg-gray-100 border-none rounded-md cursor-pointer"
             >
               Cancel
             </button>
@@ -783,6 +689,11 @@ export function BoardView({ boardId }: BoardViewProps) {
         onClose={() => setShowJoinModal(false)}
         onJoin={handleJoinRoom}
       />
+
+      {/* Lightboxes */}
+      <ItemLightbox itemImages={itemImages} />
+      <MatchDetailsLightbox />
+      <ImageEditorModal onSave={handleImageEditorSave} />
     </div>
   );
 }

@@ -1,9 +1,10 @@
-import { createStorage, type Storage } from "unstorage";
+import { createStorage } from "unstorage";
 import localStorageDriver from "unstorage/drivers/localstorage";
 import memoryDriver from "unstorage/drivers/memory";
 import type { BoardDocument, BoardId } from "../documents";
 import type { AutomergeUrl } from "@automerge/react";
 import { getRepo } from "../automerge/AutomergeRepoProvider";
+import type { DocHandle } from "@automerge/react";
 
 export interface BoardSummary {
   id: BoardId;
@@ -61,6 +62,21 @@ export interface BoardStorage {
    * Import a board from a file
    */
   importBoard(file: File): Promise<BoardId>;
+
+  /**
+   * Get the Automerge URL for a board ID
+   */
+  getBoardUrl(id: BoardId): Promise<AutomergeUrl | null>;
+
+  /**
+   * Store a URL mapping for a board (used when creating documents)
+   */
+  storeBoardUrl(id: BoardId, url: AutomergeUrl): Promise<void>;
+
+  /**
+   * Get a document handle by board ID
+   */
+  getBoardHandle(id: BoardId): Promise<DocHandle<BoardDocument> | null>;
 }
 
 /**
@@ -80,39 +96,16 @@ export function createBoardStorage(kvBinding?: KVNamespace): BoardStorage {
 
   return {
     async getBoard(id: BoardId): Promise<BoardDocument | null> {
-      try {
-        const repo = getRepo();
-        const record = await urlStorage.getItem(`board:${id}`);
-        
-        if (!record) {
-          return null;
-        }
-
-        // Find document in repo by URL
-        const handle = repo.find<BoardDocument>(record.automergeUrl);
-        await handle.whenReady();
-        
-        const doc = handle.doc();
-        return doc || null;
-      } catch (error) {
-        console.error("[BoardStorage] Failed to get board:", error);
-        return null;
-      }
+      const handle = await this.getBoardHandle(id);
+      if (!handle) return null;
+      return handle.doc() || null;
     },
 
     async getBoardBinary(id: BoardId): Promise<Uint8Array | null> {
       try {
-        const repo = getRepo();
-        const record = await urlStorage.getItem(`board:${id}`);
+        const handle = await this.getBoardHandle(id);
+        if (!handle) return null;
         
-        if (!record) {
-          return null;
-        }
-
-        const handle = repo.find<BoardDocument>(record.automergeUrl);
-        await handle.whenReady();
-        
-        // Save to binary for export
         const doc = handle.doc();
         if (!doc) return null;
         
@@ -127,9 +120,6 @@ export function createBoardStorage(kvBinding?: KVNamespace): BoardStorage {
 
     async saveBoard(id: BoardId, doc: BoardDocument): Promise<void> {
       try {
-        const repo = getRepo();
-        
-        // Check if we already have a URL for this boardId
         const existingRecord = await urlStorage.getItem(`board:${id}`);
         
         if (existingRecord) {
@@ -140,7 +130,7 @@ export function createBoardStorage(kvBinding?: KVNamespace): BoardStorage {
           });
         } else {
           // Create new document in repo with the board data
-          // The repo will handle storage automatically
+          const repo = getRepo();
           const handle = repo.create<BoardDocument>({
             ...doc,
             updatedAt: Date.now(),
@@ -160,9 +150,22 @@ export function createBoardStorage(kvBinding?: KVNamespace): BoardStorage {
     },
 
     async deleteBoard(id: BoardId): Promise<void> {
+      // Get the URL before deleting the mapping
+      const record = await urlStorage.getItem(`board:${id}`);
+      
+      // Remove URL mapping
       await urlStorage.removeItem(`board:${id}`);
-      // Note: The actual document remains in Repo storage
-      // In a production app, you might want to implement document deletion
+      
+      // Delete document from Repo storage if we have the URL
+      if (record?.automergeUrl) {
+        try {
+          const repo = getRepo();
+          repo.delete(record.automergeUrl);
+          console.log("[BoardStorage] Deleted document from Repo:", record.automergeUrl);
+        } catch (error) {
+          console.error("[BoardStorage] Failed to delete document from Repo:", error);
+        }
+      }
     },
 
     async listBoards(): Promise<BoardSummary[]> {
@@ -175,9 +178,8 @@ export function createBoardStorage(kvBinding?: KVNamespace): BoardStorage {
           if (!record) continue;
 
           try {
-            const repo = getRepo();
-            const handle = repo.find<BoardDocument>(record.automergeUrl);
-            await handle.whenReady();
+            const handle = await this.getBoardHandle(record.boardId);
+            if (!handle) continue;
             
             const doc = handle.doc();
             if (!doc) continue;
@@ -228,6 +230,34 @@ export function createBoardStorage(kvBinding?: KVNamespace): BoardStorage {
       
       return newId;
     },
+
+    async getBoardUrl(id: BoardId): Promise<AutomergeUrl | null> {
+      const record = await urlStorage.getItem(`board:${id}`);
+      return record?.automergeUrl || null;
+    },
+
+    async storeBoardUrl(id: BoardId, url: AutomergeUrl): Promise<void> {
+      await urlStorage.setItem(`board:${id}`, {
+        automergeUrl: url,
+        boardId: id,
+        updatedAt: Date.now(),
+      });
+    },
+
+    async getBoardHandle(id: BoardId): Promise<DocHandle<BoardDocument> | null> {
+      try {
+        const record = await urlStorage.getItem(`board:${id}`);
+        if (!record) return null;
+
+        const repo = getRepo();
+        const handle = await repo.find<BoardDocument>(record.automergeUrl);
+        await handle.whenReady();
+        return handle;
+      } catch (error) {
+        console.error("[BoardStorage] Failed to get board handle:", error);
+        return null;
+      }
+    },
   };
 }
 
@@ -243,16 +273,26 @@ function createKVDriver(kvBinding: KVNamespace) {
   return {
     async getItem(key: string) {
       try {
-        return await kvBinding.get(key);
+        const value = await kvBinding.get(key);
+        if (value === null) return null;
+        try {
+          return JSON.parse(value);
+        } catch {
+          return value;
+        }
       } catch {
         return null;
       }
     },
     async setItem(key: string, value: any) {
-      await kvBinding.put(key, value);
+      await kvBinding.put(key, JSON.stringify(value));
     },
     async removeItem(key: string) {
       await kvBinding.delete(key);
+    },
+    async hasItem(key: string) {
+      const value = await kvBinding.get(key);
+      return value !== null;
     },
     async getKeys(prefix?: string) {
       const result = await kvBinding.list(prefix ? { prefix } : undefined);

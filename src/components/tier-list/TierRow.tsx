@@ -59,67 +59,29 @@ export function TierRow({ tier, items, itemImages, onItemMove, onItemDrop }: Tie
   return (
     <div
       ref={ref}
-      className="tier-row"
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: "16px",
-        padding: "12px 16px",
-        background: isOver ? "rgba(0,0,0,0.05)" : "transparent",
-        borderRadius: "8px",
-        transition: "background 0.15s ease",
-        minHeight: "64px",
-      }}
+      className={`tier-row flex items-start gap-4 px-4 py-3 rounded-lg transition-colors duration-150 min-h-16 ${isOver ? "bg-black/5" : "bg-transparent"}`}
       data-tier-id={tier.id}
     >
-      {/* Tier label */}
       <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: "48px",
-          height: "48px",
-          borderRadius: "8px",
-          background: tier.color,
-          color: "white",
-          fontSize: "20px",
-          fontWeight: "bold",
-          flexShrink: 0,
-        }}
+        className="flex items-center justify-center w-12 h-12 rounded-lg text-white text-xl font-bold shrink-0"
+        style={{ background: tier.color }}
       >
         {tier.label}
       </div>
 
-      {/* Tier name */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          minWidth: "80px",
-          fontSize: "14px",
-          fontWeight: 500,
-          color: "#666",
-        }}
-      >
+      <div className="flex items-center min-w-20 text-sm font-medium text-[#666]">
         {tier.name}
       </div>
 
-      {/* Items in this tier */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "8px",
-          flex: 1,
-          padding: "8px",
-          borderRadius: "6px",
-          background: "rgba(0,0,0,0.03)",
-          minHeight: "48px",
-        }}
-      >
+      <div className="flex flex-wrap gap-2 flex-1 p-2 rounded-md bg-black/[0.03] min-h-12">
         {items.map((item) => (
-          <TierItem key={item.id} item={item} tier={tier} imageUrl={itemImages?.get(item.id)} />
+          <TierItem
+            key={item.id}
+            item={item}
+            tier={tier}
+            tierItems={items}
+            imageUrl={itemImages?.get(item.id)}
+          />
         ))}
       </div>
     </div>

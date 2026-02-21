@@ -45,15 +45,7 @@ export function ConnectionStatusIndicator({
     switch (syncStatus) {
       case "syncing":
         return (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              color: "#2196F3",
-              fontSize: "12px",
-            }}
-          >
+          <div className="flex items-center gap-1 text-[#2196F3] text-xs">
             <ArrowsClockwise size={14} weight="bold" className="animate-spin" />
             <span>Syncing...</span>
           </div>
@@ -61,15 +53,7 @@ export function ConnectionStatusIndicator({
       case "synced":
         if (connectedPeers > 0) {
           return (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                color: "#4CAF50",
-                fontSize: "12px",
-              }}
-            >
+            <div className="flex items-center gap-1 text-[#4CAF50] text-xs">
               <ArrowsClockwise size={14} weight="fill" />
               <span>Synced</span>
             </div>
@@ -78,15 +62,7 @@ export function ConnectionStatusIndicator({
         return null;
       case "error":
         return (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              color: "#FF4444",
-              fontSize: "12px",
-            }}
-          >
+          <div className="flex items-center gap-1 text-[#FF4444] text-xs">
             <WifiNone size={14} weight="fill" />
             <span>Sync error</span>
           </div>
@@ -98,34 +74,19 @@ export function ConnectionStatusIndicator({
 
   return (
     <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "12px",
-        padding: "8px 12px",
-        background: status === "connected" ? "#e8f5e9" : "#f5f5f5",
-        borderRadius: "8px",
-        fontSize: "14px",
-      }}
+      className={`flex items-center gap-3 py-2 px-3 rounded-lg text-sm ${
+        status === "connected" ? "bg-green-50" : "bg-gray-100"
+      }`}
     >
       {getStatusIcon()}
-      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-        <span style={{ color: "#666" }}>{getStatusText()}</span>
+      <div className="flex flex-col gap-0.5">
+        <span className="text-gray-500">{getStatusText()}</span>
         {getSyncIndicator()}
       </div>
       {peerCount > 0 && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-            marginLeft: "8px",
-            paddingLeft: "8px",
-            borderLeft: "1px solid #ddd",
-          }}
-        >
+        <div className="flex items-center gap-1 ml-2 pl-2 border-l border-gray-300">
           <Users size={16} color="#666" />
-          <span style={{ color: "#666", fontWeight: 500 }}>{peerCount}</span>
+          <span className="text-gray-500 font-medium">{peerCount}</span>
         </div>
       )}
     </div>

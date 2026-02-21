@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import Cropper from "react-easy-crop";
 import "react-easy-crop/dist/react-easy-crop.css";
 
@@ -87,30 +87,11 @@ export function ImageCropModal({
 
   return (
     <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0,0,0,0.8)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+      className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000]"
       onClick={onClose}
     >
       <div
-        style={{
-          position: "relative",
-          width: "80%",
-          maxWidth: "600px",
-          height: "60vh",
-          background: "black",
-          borderRadius: "8px",
-          overflow: "hidden",
-        }}
+        className="relative w-4/5 max-w-[600px] h-[60vh] bg-black rounded-lg overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <Cropper
@@ -127,23 +108,9 @@ export function ImageCropModal({
           onCropComplete={handleCropComplete}
         />
 
-        {/* Controls */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            padding: "16px",
-            background: "rgba(0,0,0,0.7)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px",
-          }}
-        >
-          {/* Zoom slider */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ color: "white", fontSize: "14px" }}>Zoom:</span>
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-black/70 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-white text-sm">Zoom:</span>
             <input
               type="range"
               min={1}
@@ -151,13 +118,12 @@ export function ImageCropModal({
               step={0.1}
               value={zoom}
               onChange={(e) => setZoom(Number(e.target.value))}
-              style={{ flex: 1 }}
+              className="flex-1"
             />
           </div>
 
-          {/* Rotation slider */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ color: "white", fontSize: "14px" }}>Rotate:</span>
+          <div className="flex items-center gap-2">
+            <span className="text-white text-sm">Rotate:</span>
             <input
               type="range"
               min={0}
@@ -165,35 +131,20 @@ export function ImageCropModal({
               step={1}
               value={rotation}
               onChange={(e) => setRotation(Number(e.target.value))}
-              style={{ flex: 1 }}
+              className="flex-1"
             />
           </div>
 
-          {/* Action buttons */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+          <div className="flex justify-end gap-2">
             <button
               onClick={onClose}
-              style={{
-                padding: "8px 16px",
-                background: "transparent",
-                border: "1px solid white",
-                color: "white",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
+              className="px-4 py-2 bg-transparent border border-white text-white rounded cursor-pointer"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
-              style={{
-                padding: "8px 16px",
-                background: "#4CAF50",
-                border: "none",
-                color: "white",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
+              className="px-4 py-2 bg-green-500 border-none text-white rounded cursor-pointer"
             >
               Save
             </button>

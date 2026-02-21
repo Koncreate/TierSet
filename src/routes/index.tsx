@@ -1,7 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useButton } from "@react-aria/button";
-import { useFocusRing } from "@react-aria/focus";
-import { mergeProps } from "@react-aria/utils";
 import { useState } from "react";
 import { SquaresFour, Trophy, ArrowRight, Star, Waves, ShieldCheck } from "@phosphor-icons/react";
 

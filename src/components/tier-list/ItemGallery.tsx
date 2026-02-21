@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import type { BoardItem, BoardDocument } from "../../lib/documents";
+import type { BoardDocument } from "../../lib/documents";
 import { TierItem } from "./TierItem";
 
 interface ItemGalleryProps {
@@ -10,17 +10,12 @@ interface ItemGalleryProps {
   onItemDrop?: (itemId: string) => void;
 }
 
-/**
- * Gallery of unplaced items (items not in any tier)
- */
 export function ItemGallery({ board, itemImages, onItemMove, onItemDrop }: ItemGalleryProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [isOver, setIsOver] = useState(false);
 
-  // Find items not in any tier
   const unplacedItems = React.useMemo(() => {
     const itemsInTiers = new Set<string>(board.tiers.flatMap((tier) => tier.itemIds));
-
     return board.items.filter((item) => !itemsInTiers.has(item.id));
   }, [board]);
 
@@ -57,37 +52,19 @@ export function ItemGallery({ board, itemImages, onItemMove, onItemDrop }: ItemG
   return (
     <div
       ref={ref}
-      className="item-gallery"
-      style={{
-        padding: "16px",
-        background: isOver ? "rgba(0,0,0,0.05)" : "#f5f5f5",
-        borderRadius: "12px",
-        transition: "background 0.15s ease",
-        marginTop: "16px",
-      }}
+      className={`p-4 rounded-xl transition-colors duration-150 mt-4 ${isOver ? "bg-black/5" : "bg-gray-100"}`}
     >
-      <h3
-        style={{
-          fontSize: "16px",
-          fontWeight: 600,
-          marginBottom: "12px",
-          color: "#666",
-        }}
-      >
+      <h3 className="text-base font-semibold mb-3 text-gray-500">
         Unplaced Items ({unplacedItems.length})
       </h3>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "8px",
-        }}
-      >
+      <div className="flex flex-wrap gap-2">
         {unplacedItems.map((item) => (
           <TierItem
             key={item.id}
             item={item}
-            tier={board.tiers[0]} // Use first tier for styling
+            tier={board.tiers[0]}
+            tierItems={unplacedItems}
+            imageUrl={itemImages?.get(item.id)}
           />
         ))}
       </div>

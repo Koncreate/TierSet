@@ -6,7 +6,7 @@ import { WebRTCNetworkAdapter } from "../p2p/WebRTCNetworkAdapter";
 import { createId } from "../ids";
 import type { BoardDocument, BoardChangeFn } from "../documents";
 import type { P2PNetwork } from "../p2p";
-import { decodeRoomCode } from "../p2p/room-code";
+import { getBoardStorage } from "../board/board-storage-unstorage";
 
 interface AutomergeRepoProviderProps {
   children: ReactNode;
@@ -16,12 +16,6 @@ interface AutomergeRepoProviderProps {
  * Global repo instance - created once and shared across the app
  */
 let globalRepo: Repo | null = null;
-
-/**
- * Map of boardId to Automerge document URL
- * This allows us to use simple boardIds while Repo uses proper URLs
- */
-const boardIdToUrlMap = new Map<string, AutomergeUrl>();
 
 /**
  * Get or create the global repo instance
@@ -44,19 +38,25 @@ export function getRepo(): Repo {
 /**
  * Get or create a board document in the repo
  * Returns the document handle and URL
+ * 
+ * Uses persistent URL storage (localStorage) so board mappings survive page reloads
  */
 export async function getOrCreateBoardDoc(
   repo: Repo,
   boardId: string,
   initialData?: Partial<BoardDocument>
 ): Promise<{ handle: DocHandle<BoardDocument>; url: AutomergeUrl }> {
-  // Check if we already have a URL for this boardId
-  let url = boardIdToUrlMap.get(boardId);
+  const boardStorage = getBoardStorage();
 
-  if (url) {
-    // Find existing document
-    const handle = await repo.find<BoardDocument>(url);
-    return { handle, url };
+  // First, check if we already have a URL mapping in persistent storage
+  const existingUrl = await boardStorage.getBoardUrl(boardId);
+  
+  if (existingUrl) {
+    console.log("[AutomergeRepo] Found existing URL for board:", boardId, "->", existingUrl);
+    // Find the existing document
+    const handle = await repo.find<BoardDocument>(existingUrl);
+    await handle.whenReady();
+    return { handle, url: existingUrl };
   }
 
   // Create new document with initial data
@@ -80,10 +80,10 @@ export async function getOrCreateBoardDoc(
   };
 
   const handle = repo.create<BoardDocument>(initialBoard as BoardDocument);
-  url = handle.url;
+  const url = handle.url;
 
-  // Store mapping
-  boardIdToUrlMap.set(boardId, url);
+  // Persist the URL mapping so it survives page reloads
+  await boardStorage.storeBoardUrl(boardId, url);
 
   console.log("[AutomergeRepo] Created board document:", { boardId, url });
 
@@ -188,11 +188,15 @@ export async function disconnectRepoFromNetwork(
 
 /**
  * Hook for managing a board document with automatic Repo integration
+ * 
+ * @param boardId - The board ID
+ * @param initialData - Initial data for creating a new document (host only)
+ * @param documentUrl - The Automerge document URL (REQUIRED for clients joining rooms)
  */
 export function useBoardDocument(
   boardId: string,
   initialData?: Partial<BoardDocument>,
-  roomCode?: string | null  // Room code with embedded document URL (for clients joining rooms)
+  documentUrl?: string | null  // Direct document URL - no decoding needed
 ): {
   doc: BoardDocument | null;
   change: (callback: BoardChangeFn) => void;
@@ -206,55 +210,41 @@ export function useBoardDocument(
   const [error, setError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [handle, setHandle] = useState<DocHandle<BoardDocument> | null>(null);
-  const previousRoomCode = useRef<string | null | undefined>(undefined);
+  const previousDocUrl = useRef<string | null | undefined>(undefined);
 
-  // Extract document URL from room code if present
-  let documentUrl: string | null = null;
-  if (roomCode) {
-    const decoded = decodeRoomCode(roomCode);
-    if (decoded) {
-      documentUrl = decoded.documentUrl;
-      console.log("[useBoardDocument] Decoded document URL from room code:", documentUrl);
-    }
-  }
-
-  // Detect when room code (and thus document URL) changes and reset state
+  // Detect when document URL changes and reset state
   useEffect(() => {
-    if (previousRoomCode.current !== roomCode) {
-      // Only reset if we haven't already loaded this document
-      const decoded = roomCode ? decodeRoomCode(roomCode) : null;
-      const newDocUrl = decoded?.documentUrl || null;
-      
-      if (newDocUrl && newDocUrl === docUrl) {
-        // Same document URL, don't reset
-        console.log("[useBoardDocument] Same document URL, skipping reset");
-        previousRoomCode.current = roomCode;
-        return;
+    if (previousDocUrl.current !== documentUrl) {
+      // New document URL - reset state to load it
+      if (documentUrl && documentUrl !== docUrl) {
+        console.log("[useBoardDocument] Document URL changed to:", documentUrl);
+        setIsLoading(true);
+        setError(null);
+        setDocUrl(null);
+        setHandle(null);
       }
-      
-      // Room code changed - reset state for re-initialization
-      console.log("[useBoardDocument] roomCode changed from", previousRoomCode.current, "to", roomCode);
-      setIsLoading(true);
-      setError(null);
-      setDocUrl(null);
-      setHandle(null);
-      previousRoomCode.current = roomCode;
+      previousDocUrl.current = documentUrl;
     }
-  }, [roomCode, docUrl]);
+  }, [documentUrl, docUrl]);
 
   // Initialize document
   useEffect(() => {
     if (!repo) return;
 
-    // Skip if already initialized with same URL
-    if (documentUrl && docUrl === documentUrl && !isLoading) {
-      console.log("[useBoardDocument] Already initialized with this URL, skipping");
+    // Skip if already loaded the correct document
+    if (isLoading === false && docUrl === documentUrl) {
       return;
     }
 
-    // When documentUrl is null (host), only initialize once
-    if (documentUrl === null && docUrl !== null) {
+    // Host mode (no documentUrl): Create new document only once
+    if (!documentUrl && docUrl) {
       console.log("[useBoardDocument] Host already has doc, skipping");
+      return;
+    }
+
+    // Client mode with documentUrl: Skip if already loading/loaded this document
+    if (documentUrl && docUrl === documentUrl) {
+      console.log("[useBoardDocument] Already have this document, skipping");
       return;
     }
 
@@ -264,39 +254,26 @@ export function useBoardDocument(
         let docHandle: DocHandle<BoardDocument>;
 
         if (documentUrl) {
-          // Client: Use URL from room to find existing document
+          // CLIENT: Load existing document from URL
           url = documentUrl as AutomergeUrl;
-          console.log("[useBoardDocument] Attempting to find document:", url);
+          console.log("[useBoardDocument] Loading client document:", url);
 
-          // repo.find() starts syncing the document from peers
-          // Retry with exponential backoff if document isn't available yet
-          let lastError: Error | null = null;
-          const maxRetries = 10;
-          const baseDelay = 500; // 500ms, 1s, 2s, 4s, 8s...
+          docHandle = await repo.find<BoardDocument>(url);
+          console.log("[useBoardDocument] Handle created, isReady:", docHandle.isReady?.());
 
-          for (let attempt = 0; attempt < maxRetries; attempt++) {
-            try {
-              docHandle = await repo.find<BoardDocument>(url);
-              console.log("[useBoardDocument] Found existing document via room URL:", url);
-              break; // Success!
-            } catch (findError: any) {
-              lastError = findError;
-              console.log(`[useBoardDocument] Attempt ${attempt + 1}/${maxRetries} failed:`, findError.message);
+          // Wait for document to be ready (synced from host or storage)
+          const MAX_WAIT_TIME = 10000; // 10 seconds
+          const readyPromise = docHandle.whenReady();
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`Document not ready after ${MAX_WAIT_TIME}ms`));
+            }, MAX_WAIT_TIME);
+          });
 
-              if (attempt < maxRetries - 1) {
-                // Wait with exponential backoff before retrying
-                const delay = baseDelay * Math.pow(2, attempt);
-                console.log(`[useBoardDocument] Retrying in ${delay}ms...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-              }
-            }
-          }
-
-          if (!docHandle) {
-            throw new Error(`Failed to find document after ${maxRetries} attempts. Last error: ${lastError?.message}`);
-          }
+          await Promise.race([readyPromise, timeoutPromise]);
+          console.log("[useBoardDocument] Found existing document:", url);
         } else {
-          // Host: Create new document
+          // HOST: Create new document
           const result = await getOrCreateBoardDoc(repo, boardId, initialData);
           url = result.url;
           docHandle = result.handle;
@@ -314,7 +291,7 @@ export function useBoardDocument(
     }
 
     initDoc();
-  }, [repo, boardId, documentUrl]);
+  }, [repo, boardId, documentUrl, initialData]);
 
   // Use Automerge's useDocument hook
   const [doc, changeDoc] = useDocument<BoardDocument>(docUrl!, {

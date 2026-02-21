@@ -1,20 +1,26 @@
-import React from "react";
+import React, { useCallback, useRef } from "react";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { setCustomNativeDragPreview } from "@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview";
+import { Button } from "react-aria-components";
 import type { BoardItem, Tier } from "../../lib/documents";
+import { uiActions } from "../../stores";
 
 interface TierItemProps {
   item: BoardItem;
   tier: Tier;
+  tierItems: BoardItem[];
   imageUrl?: string;
   onClick?: (itemId: string) => void;
 }
 
-export function TierItem({ item, tier, imageUrl, onClick }: TierItemProps) {
-  const ref = React.useRef<HTMLDivElement>(null);
+const DRAG_COOLDOWN_MS = 300;
+
+export function TierItem({ item, tier, tierItems, imageUrl, onClick }: TierItemProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const lastDragTimeRef = useRef<number>(0);
 
   React.useEffect(() => {
-    const element = ref.current;
+    const element = buttonRef.current;
     if (!element) return;
 
     return draggable({
@@ -26,10 +32,11 @@ export function TierItem({ item, tier, imageUrl, onClick }: TierItemProps) {
       }),
       onDragStart: () => {
         element.setAttribute("data-is-dragging", "true");
+        lastDragTimeRef.current = Date.now();
 
-        // Set custom drag preview
         setCustomNativeDragPreview({
           getOffset: () => ({ x: 16, y: 16 }),
+          nativeSetDragImage: null,
           render: ({ container }) => {
             const preview = document.createElement("div");
             preview.style.cssText = `
@@ -52,80 +59,46 @@ export function TierItem({ item, tier, imageUrl, onClick }: TierItemProps) {
     });
   }, [item.id, tier.id, tier.color, item.name]);
 
-  const handleClick = () => {
+  const handleClick = useCallback(() => {
     onClick?.(item.id);
-  };
+  }, [onClick, item.id]);
+
+  const handleDoubleClick = useCallback(() => {
+    const timeSinceLastDrag = Date.now() - lastDragTimeRef.current;
+    if (timeSinceLastDrag < DRAG_COOLDOWN_MS) {
+      return;
+    }
+    uiActions.openTierLightbox(tier.id, tierItems, item.id);
+  }, [tier.id, tierItems, item.id]);
 
   return (
-    <div
-      ref={ref}
-      className="tier-item"
-      role="button"
-      tabIndex={0}
-      onClick={handleClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          handleClick();
-        }
-      }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        padding: "8px 12px",
-        background: "white",
-        borderRadius: "6px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
-        cursor: "grab",
-        userSelect: "none",
-        minWidth: "120px",
-        maxWidth: "200px",
-      }}
+    <Button
+      ref={buttonRef}
+      onPress={handleClick}
+      onDoubleClick={handleDoubleClick}
+      className="tier-item flex items-center gap-2 px-3 py-2 bg-white rounded-md shadow-[0_1px_3px_rgba(0,0,0,0.12)] cursor-grab select-none min-w-[120px] max-w-[200px] border-none text-left"
       data-item-id={item.id}
     >
       {imageUrl ? (
         <img
           src={imageUrl}
           alt=""
-          style={{
-            width: "32px",
-            height: "32px",
-            borderRadius: "4px",
-            objectFit: "cover",
-          }}
+          className="w-8 h-8 rounded object-cover"
           draggable={false}
         />
       ) : item.emoji ? (
-        <span
-          style={{
-            fontSize: "24px",
-            lineHeight: 1,
-          }}
-        >
+        <span className="text-2xl leading-none">
           {item.emoji}
         </span>
       ) : (
         <div
-          style={{
-            width: "32px",
-            height: "32px",
-            borderRadius: "4px",
-            background: tier.color,
-          }}
+          className="w-8 h-8 rounded"
+          style={{ background: tier.color }}
         />
       )}
-      <span
-        style={{
-          fontSize: "14px",
-          fontWeight: 500,
-          color: "#1d1d1d",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
+      <span className="text-sm font-medium text-[#1d1d1d] overflow-hidden text-ellipsis whitespace-nowrap">
         {item.name}
       </span>
-    </div>
+    </Button>
   );
 }

@@ -19,6 +19,7 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
   private messageQueue: Map<string, Uint8Array[]> = new Map();
   private cleanupHandlers: Array<() => void> = [];
   private ready = false;
+  private static readonly MAX_QUEUE_SIZE = 100;
 
   constructor(p2pNetwork?: P2PNetwork) {
     super();
@@ -51,12 +52,14 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
   /**
    * Connect to the P2P network
    * The peerId comes from the Repo, we use it to identify ourselves
+   * Note: We don't set ready=true here - that happens when data channel opens in attachP2PNetwork()
    */
   connect(peerId: string, _peerMetadata?: PeerMetadata): void {
     console.log("[WebRTCNetworkAdapter] Connect called with peerId:", peerId);
     this.peerId = peerId as any;
-    this.ready = true;
-    this.emit("ready" as any);
+    // Don't set ready=true here - wait for data channel to open
+    // this.ready = true;
+    // this.emit("ready" as any);
   }
 
   /**
@@ -88,9 +91,12 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
           targetId: undefined as any,
           data: new Uint8Array(message.data),
         } as unknown as Message;
+        console.log("[WebRTCNetworkAdapter] Repo message object created, targetId:", repoMessage.targetId);
         console.log("[WebRTCNetworkAdapter] Emitting message event to Repo");
         this.emit("message", repoMessage);
-        console.log("[WebRTCNetworkAdapter] Message event emitted");
+        console.log("[WebRTCNetworkAdapter] Message event emitted, listeners count:", this.listenerCount("message"));
+      } else {
+        console.log("[WebRTCNetworkAdapter] Received non-automerge message:", message.type);
       }
     };
 
@@ -113,8 +119,8 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
     const handleStatusChanged = (status: string) => {
       console.log("[WebRTCNetworkAdapter] Status changed:", status);
       if (status === "connected" && !this.ready) {
-        this.ready = true;
-        this.emit("ready" as any);
+        // Don't mark as ready yet - wait for data channel to be open
+        console.log("[WebRTCNetworkAdapter] Connection established, waiting for data channel...");
       } else if (status === "disconnected" || status === "failed") {
         this.ready = false;
         // Emit disconnect for all peers
@@ -140,11 +146,54 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
       () => network.off("status:changed", handleStatusChanged),
     ];
 
-    // If already connected, emit ready
-    if (network.getStatus() === "connected") {
+    // Check if data channel is already open
+    if (network.isDataChannelOpen()) {
+      console.log("[WebRTCNetworkAdapter] Data channel already open, marking as ready");
       this.ready = true;
       this.emit("ready" as any);
+      // Flush any queued messages
+      this.flushAllQueuedMessages();
+    } else {
+      // Wait for data channel to open
+      const checkDataChannel = () => {
+        if (network.isDataChannelOpen() && !this.ready) {
+          console.log("[WebRTCNetworkAdapter] Data channel opened, marking as ready");
+          this.ready = true;
+          this.emit("ready" as any);
+          // Flush any queued messages
+          this.flushAllQueuedMessages();
+          // Stop checking once ready
+          network.off("status:changed", checkDataChannel);
+          clearInterval(checkInterval);
+        }
+      };
+
+      // Check periodically for data channel to open
+      const checkInterval = setInterval(checkDataChannel, 100);
+
+      // Also listen for status changes that might indicate data channel is ready
+      network.on("status:changed", checkDataChannel);
+      this.cleanupHandlers.push(() => {
+        clearInterval(checkInterval);
+      });
     }
+  }
+
+  /**
+   * Flush all queued messages to peers
+   */
+  private flushAllQueuedMessages(): void {
+    if (!this.p2pNetwork) return;
+
+    for (const [peerId, messages] of this.messageQueue) {
+      if (messages.length > 0) {
+        console.log("[WebRTCNetworkAdapter] Flushing", messages.length, "queued messages to:", peerId);
+        for (const message of messages) {
+          this.p2pNetwork.sendAutomergeMessage(peerId, message);
+        }
+      }
+    }
+    this.messageQueue.clear();
   }
 
   /**
@@ -152,6 +201,12 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
    */
   disconnect(): void {
     console.log("[WebRTCNetworkAdapter] Disconnecting");
+
+    // Try to flush any remaining queued messages if channel is still open
+    if (this.p2pNetwork?.isDataChannelOpen() && this.messageQueue.size > 0) {
+      console.log("[WebRTCNetworkAdapter] Flushing queued messages before disconnect");
+      this.flushAllQueuedMessages();
+    }
 
     // Clean up event listeners
     for (const cleanup of this.cleanupHandlers) {
@@ -161,6 +216,7 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
 
     this.ready = false;
     this.p2pNetwork = null;
+    this.messageQueue.clear();
     this.emit("close");
   }
 
@@ -181,6 +237,22 @@ export class WebRTCNetworkAdapter extends NetworkAdapter {
 
     if (!message.data) {
       console.warn("[WebRTCNetworkAdapter] No data in message");
+      return;
+    }
+
+    // Check if data channel is ready - if not, queue the message
+    if (!this.ready || !this.p2pNetwork.isDataChannelOpen()) {
+      console.log("[WebRTCNetworkAdapter] Data channel not ready, queueing message to:", targetPeerId);
+      const queue = this.messageQueue.get(targetPeerId) || [];
+      
+      // Enforce queue size limit - drop oldest messages
+      if (queue.length >= WebRTCNetworkAdapter.MAX_QUEUE_SIZE) {
+        console.warn("[WebRTCNetworkAdapter] Queue full for peer:", targetPeerId, "dropping oldest message");
+        queue.shift();
+      }
+      
+      queue.push(message.data);
+      this.messageQueue.set(targetPeerId, queue);
       return;
     }
 
