@@ -72,9 +72,11 @@ export function useJoinRoom(): UseJoinRoomReturn {
 
     // CRITICAL: Decode document URL from room code FIRST
     // This is the key to ensuring client loads the correct document
+    console.log("[useJoinRoom] Attempting to join room with code:", code);
     const decoded = decodeRoomCode(code);
+    console.log("[useJoinRoom] Decoded result:", decoded);
     if (!decoded?.documentUrl) {
-      const err = new Error("Invalid room code: no document URL found");
+      const err = new Error(`Invalid room code: no document URL found. Code format: "${code.substring(0, 30)}${code.length > 30 ? "..." : ""}"`);
       handleConnectionError(err);
       return { documentUrl: null, success: false };
     }

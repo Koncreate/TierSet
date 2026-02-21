@@ -32,24 +32,42 @@ export function encodeRoomCode(shortCode: string, documentUrl: string): string {
  */
 export function decodeRoomCode(fullCode: string): { shortCode: string; documentUrl: string } | null {
   try {
+    console.log("[decodeRoomCode] Input:", fullCode);
+    
     // Look for double-dash separator
     const separatorIndex = fullCode.indexOf('--');
-    if (separatorIndex === -1) return null;
-    
+    if (separatorIndex === -1) {
+      console.log("[decodeRoomCode] No '--' separator found");
+      return null;
+    }
+
     const shortCode = fullCode.substring(0, separatorIndex);
     const encoded = fullCode.substring(separatorIndex + 2);
     
+    console.log("[decodeRoomCode] Short code:", shortCode);
+    console.log("[decodeRoomCode] Encoded part:", encoded);
+
     // Restore base64 padding and convert URL-safe chars back
     const base64 = encoded
       .replace(/-/g, '+')
       .replace(/_/g, '/');
-    const documentUrl = atob(base64);
     
+    // Add padding if needed (base64 length should be multiple of 4)
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    console.log("[decodeRoomCode] Base64 after padding:", padded);
+    
+    const documentUrl = atob(padded);
+    console.log("[decodeRoomCode] Decoded URL:", documentUrl);
+
     // Validate it looks like an automerge URL
-    if (!documentUrl.startsWith('automerge:')) return null;
-    
+    if (!documentUrl.startsWith('automerge:')) {
+      console.log("[decodeRoomCode] Does not start with 'automerge:'");
+      return null;
+    }
+
     return { shortCode, documentUrl };
-  } catch {
+  } catch (error) {
+    console.error("[decodeRoomCode] Error:", error);
     return null;
   }
 }
