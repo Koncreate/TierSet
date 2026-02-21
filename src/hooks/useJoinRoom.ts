@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useStore } from '@tanstack/react-store';
 import { appStore } from "../stores/appStore";
-import { joinRoomAsClient, handleConnectionError } from "../stores/appStore.actions";
+import { joinRoomAsClient, handleConnectionError, roomActions } from "../stores/appStore.actions";
 import { decodeRoomCode } from "../lib/p2p/room-code";
 import type { P2PNetwork } from "../lib/p2p";
 
