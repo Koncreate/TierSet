@@ -23,9 +23,26 @@ export function JoinRoomModal({ isOpen, onClose, onJoin }: JoinRoomModalProps) {
     setIsJoining(true);
 
     try {
-      // Format code (ensure TIER- prefix)
-      const formattedCode = roomCode.toUpperCase().trim();
-      const code = formattedCode.startsWith("TIER-") ? formattedCode : `TIER-${formattedCode}`;
+      // Format code - only uppercase the short code prefix, NOT the base64 part
+      // Base64 is case-sensitive, so we must preserve the encoded part exactly
+      const trimmedCode = roomCode.trim();
+      const separatorIndex = trimmedCode.indexOf('--');
+      
+      let code: string;
+      if (separatorIndex !== -1) {
+        // Code has embedded document URL - only uppercase the prefix
+        const prefix = trimmedCode.substring(0, separatorIndex).toUpperCase();
+        const base64Part = trimmedCode.substring(separatorIndex + 2); // Keep base64 case
+        code = `${prefix}--${base64Part}`;
+      } else {
+        // No embedded URL - uppercase entire code
+        code = trimmedCode.toUpperCase();
+      }
+      
+      // Ensure TIER- prefix
+      if (!code.startsWith('TIER-')) {
+        code = `TIER-${code}`;
+      }
 
       await onJoin(code, password || undefined);
       handleClose();
