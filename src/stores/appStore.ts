@@ -323,15 +323,27 @@ export async function loadAppStoreFromSnapshot(): Promise<void> {
   if (result.found && result.valid && result.data) {
     // Only restore room state (persistent data)
     const roomData = result.data.room;
-    if (roomData) {
-      appStore.setState((prev) => ({
-        ...prev,
-        room: {
-          ...prev.room,
-          roomCode: roomData.roomCode ?? null,
-          isHost: roomData.isHost ?? false,
-        },
-      }));
+    if (roomData?.roomCode) {
+      // Validate room code format before restoring
+      const { decodeRoomCode } = await import('../lib/p2p/room-code');
+      const decoded = decodeRoomCode(roomData.roomCode);
+      
+      if (decoded) {
+        console.log("[loadAppStoreFromSnapshot] Restoring room:", decoded.shortCode);
+        appStore.setState((prev) => ({
+          ...prev,
+          room: {
+            ...prev.room,
+            roomCode: decoded.shortCode,
+            isHost: roomData.isHost ?? false,
+          },
+        }));
+      } else {
+        // Invalid room code format, clear the snapshot
+        console.warn("[loadAppStoreFromSnapshot] Invalid room code in snapshot, clearing");
+        const { clearStoreSnapshot } = await import('../lib/persistence/storePersistence');
+        await clearStoreSnapshot('appStore');
+      }
     }
   }
 }
