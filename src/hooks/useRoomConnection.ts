@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useStore } from '@tanstack/react-store';
 import { appStore } from "../stores/appStore";
 import { roomActions, handleConnectionError } from "../stores/appStore.actions";
@@ -116,26 +116,6 @@ export function useRoomConnection(): UseRoomConnectionReturn {
     roomActions.setError(new Error("No previous connection to retry"));
     return false;
   }, [connectToRoom]);
-
-  // Clear persisted room state if document becomes unavailable
-  useEffect(() => {
-    const handleError = (error: Error) => {
-      if (error.message.includes("is unavailable") || error.message.includes("did you hard code")) {
-        console.warn("[useRoomConnection] Document unavailable, clearing stale room state");
-        clearStoreSnapshot("appStore");
-        roomActions.clearRoom();
-      }
-    };
-
-    // Subscribe to board errors
-    const unsubscribe = appStore.subscribe((state) => {
-      if (state.board.error) {
-        handleError(state.board.error);
-      }
-    });
-
-    return unsubscribe;
-  }, []);
 
   return {
     isConnected,
