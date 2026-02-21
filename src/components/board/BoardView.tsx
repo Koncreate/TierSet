@@ -23,7 +23,7 @@ import { Plus, Share, Download, Trash, SignIn } from "@phosphor-icons/react";
 import type { PeerInfo } from "../../lib/p2p";
 import { decodeRoomCode } from "../../lib/p2p/room-code";
 import { appStore } from "../../stores";
-import { boardActions } from "../../stores/appStore.actions";
+import { boardActions, leaveRoom as leaveRoomAction } from "../../stores/appStore.actions";
 
 interface BoardViewProps {
   boardId: BoardId;
@@ -307,11 +307,18 @@ export function BoardView({ boardId }: BoardViewProps) {
 
   // Leave room and disconnect Automerge Repo
   const handleLeaveRoom = useCallback(async () => {
+    console.log("[BoardView] Leaving room...");
+    
     // Disconnect Automerge Repo first
     await disconnectFromRoom();
 
     // Then leave P2P room
     await network?.leaveRoom();
+    
+    // Clear persisted room state and reset store
+    leaveRoomAction();
+    
+    console.log("[BoardView] Left room and cleared state");
   }, [disconnectFromRoom, network]);
 
   // Handle kicking peer (host only)
