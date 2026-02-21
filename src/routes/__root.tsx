@@ -1,8 +1,10 @@
 import { HeadContent, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
+import { useEffect } from "react";
 
 import Header from "../components/Header";
+import { TanStackStoreDevTools } from "../components/TanStackStoreDevTools";
 
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
 
@@ -11,6 +13,10 @@ import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import StoreDevtools from "../lib/demo-store-devtools";
 
 import { AutomergeRepoProvider } from "../lib/automerge/AutomergeRepoProvider";
+
+import { initializePersistence } from "../lib/persistence/storePersistence";
+import { loadAppStoreFromSnapshot, setupAppStorePersistence, cleanupAppStorePersistence } from "../stores/appStore";
+import { loadUserSettingsFromSnapshot, setupUserSettingsPersistence, cleanupUserSettingsPersistence } from "../stores/userSettingsStore";
 
 import appCss from "../styles.css?url";
 
@@ -45,6 +51,34 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  // Initialize persistence on mount (client-side only)
+  useEffect(() => {
+    async function initPersistence() {
+      try {
+        // Initialize persistence layer (cleanup expired snapshots)
+        await initializePersistence();
+
+        // Load snapshots and restore state
+        await loadAppStoreFromSnapshot();
+        await loadUserSettingsFromSnapshot();
+
+        // Setup auto-save subscriptions
+        setupAppStorePersistence();
+        setupUserSettingsPersistence();
+      } catch (error) {
+        console.error("[RootDocument] Failed to initialize persistence:", error);
+      }
+    }
+
+    initPersistence();
+
+    // Cleanup on unmount
+    return () => {
+      cleanupAppStorePersistence();
+      cleanupUserSettingsPersistence();
+    };
+  }, []);
+
   // Always use "en" for SSR to ensure hydration match
   return (
     <html lang="en">
@@ -54,8 +88,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body>
         <TanStackQueryProvider>
           <AutomergeRepoProvider>
-            <Header />
-            {children}
+            <TanStackStoreDevTools enabled={!import.meta.env.PROD}>
+              <Header />
+              {children}
+            </TanStackStoreDevTools>
             <TanStackDevtools
               config={{
                 position: "bottom-right",

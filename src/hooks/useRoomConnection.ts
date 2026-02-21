@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
+import { useStore } from '@tanstack/react-store';
+import { appStore } from "../stores/appStore";
+import { roomActions, handleConnectionError } from "../stores/appStore.actions";
 import { useRepo, connectRepoToNetwork, disconnectRepoFromNetwork } from "../lib/automerge/AutomergeRepoProvider";
+import { clearStoreSnapshot } from "../lib/persistence/storePersistence";
 import type { WebRTCNetworkAdapter } from "../lib/p2p/WebRTCNetworkAdapter";
 import type { P2PNetwork } from "../lib/p2p";
 
@@ -20,21 +24,21 @@ interface UseRoomConnectionReturn {
 
 /**
  * Hook for managing Automerge Repo room connections
- * 
- * Handles connection lifecycle, error handling, and cleanup automatically.
- * 
+ *
+ * Refactored to use TanStack Store for state management.
+ *
  * @example
  * ```tsx
  * function BoardView() {
  *   const { network } = useP2PNetwork();
  *   const { isConnected, isConnecting, error, connectToRoom, disconnectFromRoom, retry } = useRoomConnection();
- *   
+ *
  *   const handleCreateRoom = async () => {
  *     const { code } = await createRoom();
  *     const success = await connectToRoom(network);
  *     if (success) setRoomCode(code);
  *   };
- *   
+ *
  *   return (
  *     <div>
  *       {error && (
@@ -52,34 +56,32 @@ export function useRoomConnection(): UseRoomConnectionReturn {
   const repo = useRepo();
   const adapterRef = useRef<WebRTCNetworkAdapter | null>(null);
   const lastNetworkRef = useRef<P2PNetwork | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+
+  // Subscribe to room state from store
+  const isConnected = useStore(appStore, (state) => state.room.isConnected);
+  const isConnecting = useStore(appStore, (state) => state.room.isConnecting);
+  const error = useStore(appStore, (state) => state.room.error);
 
   const connectToRoom = useCallback(
     async (network: P2PNetwork): Promise<boolean> => {
       if (!repo) {
-        setError(new Error("Repo not available"));
+        handleConnectionError(new Error("Repo not available"));
         return false;
       }
 
-      setIsConnecting(true);
-      setError(null);
+      roomActions.setIsConnecting(true);
       lastNetworkRef.current = network;
 
       try {
         const { adapter } = await connectRepoToNetwork(repo, network);
         adapterRef.current = adapter;
-        setIsConnected(true);
+        roomActions.setIsConnected(true);
         return true;
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to connect to room");
         console.error("[useRoomConnection] Connection failed:", error);
-        setError(error);
-        setIsConnected(false);
+        handleConnectionError(error);
         return false;
-      } finally {
-        setIsConnecting(false);
       }
     },
     [repo]
@@ -94,8 +96,12 @@ export function useRoomConnection(): UseRoomConnectionReturn {
       } finally {
         adapterRef.current = null;
         lastNetworkRef.current = null;
-        setIsConnected(false);
-        setError(null);
+        roomActions.setIsConnected(false);
+        roomActions.setIsConnecting(false);
+        roomActions.setError(null);
+        
+        // Clear persisted room state on leave
+        clearStoreSnapshot("appStore");
       }
     }
   }, [repo]);
@@ -106,17 +112,10 @@ export function useRoomConnection(): UseRoomConnectionReturn {
       console.log("[useRoomConnection] Retrying connection");
       return await connectToRoom(lastNetworkRef.current);
     }
-    
-    setError(new Error("No previous connection to retry"));
+
+    roomActions.setError(new Error("No previous connection to retry"));
     return false;
   }, [connectToRoom]);
-
-  // Auto-cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnectFromRoom();
-    };
-  }, [disconnectFromRoom]);
 
   return {
     isConnected,
